@@ -65,7 +65,7 @@ class StackExpert:
         src, tgt = P["src_pos"], P["tgt_pos"]
         v = np.array([P["belt_vel"][0], P["belt_vel"][1], 0.0])
         yaw_src = _wrap_quarter(P["src_yaw"])
-        src_h, tgt_h = P["src_half"], P["tgt_half"]
+        src_h, tgt_h = P["src_hz"], P["tgt_hz"]
         yaw_tgt = _wrap_quarter(P["tgt_yaw"])  # align the held block with the target box
         held_h = 2 * src_h  # block bottom is this far below the TCP
         tcp_to_src_top = np.array([src[0], src[1], src[2] + src_h])

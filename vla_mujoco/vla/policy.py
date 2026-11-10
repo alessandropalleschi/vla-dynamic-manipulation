@@ -19,7 +19,7 @@ import torch
 from torch import nn
 
 WORDS = (
-    "stack the block on box moving conveyor "
+    "stack the block on box cube cylinder moving conveyor "
     + " ".join(["red", "green", "blue", "yellow", "orange", "purple", "cyan", "pink"])
 ).split()
 VOCAB = {w: i + 1 for i, w in enumerate(WORDS)}  # 0 = pad/unknown

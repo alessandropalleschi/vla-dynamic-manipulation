@@ -12,7 +12,7 @@ No ROS, no Docker, no GPU needed for simulation (headless EGL rendering works in
 | Contact quality | ODE/DART, soft | MuJoCo implicit contacts, tuned friction |
 | Suction | pre-engaged / fixture | seal check + 0.35 s grip / 0.2 s release delay (`config/vgc10.yaml`) |
 | Episode setup | edit SDF, restart sim | `env.reset(seed, options)` in-process |
-| Domain randomisation | manual | conveyor pose, cameras, colours/sizes/lighting, friction, mass, belt speed, speed jumps, distractor, occlusion |
+| Domain randomisation | manual | conveyor pose, cameras, object shapes, textures, clutter, table height, robot start, sensor noise, colours/sizes/lighting, friction, mass, belt speed, speed jumps, distractor, occlusion |
 
 ## Quick start
 See the README for the dev-container flow. Manually:
@@ -58,7 +58,7 @@ the library exists but the file does not). Rendering is correct either way, just
   `config/vgc10.yaml` (30 mm / 50 mm cups) disagrees with the URDF generator (40 mm / 44 mm); the generator
   values are used. Channels A/B are not modelled separately.
 * **Conveyor**: a belt slab on a velocity-driven slide joint, so boxes are carried by real friction, and can slip.
-* **Task**: pick the *source block* from the table, stack it on the *target box* (one of two boxes on the belt;
+* **Task**: pick the *source object* (cube, cuboid or cylinder) from the table, stack it on the *target box* (one of two boxes on the belt;
   the language instruction names the colours, so the distractor requires language grounding).
 * **Observation**: `front` / `wrist` / `overhead` RGB, 22-D proprio (q, dq, TCP pose, commanded pose, vacuum
   cmd/held), instruction string. **Privileged** state is only in `info["priv"]`.
@@ -66,17 +66,26 @@ the library exists but the file does not). Rendering is correct either way, just
   damped-least-squares IK, so the policy output is bounded by construction.
 * **Success**: block supported by the target box, XY offset <= 15 mm, vacuum released, stable for 0.5 s while the
   belt keeps moving.
-* **Domain randomisation** (`sim/randomize.py`, resampled each `reset`, seeded; scale all ranges with
-  `EnvConfig.dr_scale`, switch groups off with `randomize_conveyor|camera|appearance=False` or `--no-dr`):
-  * *Conveyor*: belt centre x +-3 cm, belt yaw +-0.1 rad (the expert follows the true belt direction and aligns the
-    held block with the target's heading), belt/rail colours.
-  * *Cameras*: front/overhead/wrist position, orientation and field of view.
-  * *Appearance*: object colours jittered around their named colour (instructions stay valid), block/box sizes
-    (+-5 mm / +-8 mm), table, floor, belt and robot tints, light positions/intensity, headlight.
-  * *Physics*: friction, block mass, belt speed, speed jumps.
-  Use `--dr-scale 1.5` in `vla-eval` for out-of-distribution robustness tests. Not randomised (yet): textures,
-  distractor clutter, camera noise/blur (training adds photometric noise and shifts), table height, robot pose
-  beyond the home configuration.
+* **Domain randomisation** (`sim/randomize.py`, resampled every `reset`, seeded). Scale all ranges with
+  `EnvConfig.dr_scale` (`--dr-scale 1.5` for out-of-distribution tests); switch groups off individually
+  (`randomize_conveyor|camera|appearance|shape|texture|clutter|table|robot_start|image`) or all at once with
+  `EnvConfig.dr_flags(False)` / `--no-dr`:
+
+  | group | what varies |
+  |---|---|
+  | conveyor | belt centre x +-3 cm, yaw +-0.1 rad (expert follows the true belt direction and aligns the held object with the target's heading), belt/rail colours, stripe density |
+  | camera pose | front/overhead/wrist position, orientation, field of view |
+  | shape | the stacked object, the target and the distractor are each a cube, a cuboid (random x/y/z extents) or an upright cylinder; inertia and collision bounds are recomputed. All have flat tops; the 4-cup VGC10 seal requires every cup centre on the top face, so sizes are bounded below by the cup layout (cylinder R >= 5 cm, cuboid half-extents >= 4.5 cm) |
+  | appearance | object colours jittered around their named colour (instructions stay valid), size jitter, table/floor/belt/robot tints, light positions/intensity, headlight |
+  | texture | per-object / table / floor texture from a pool (checker, gradient, speckle, stripes) or plain |
+  | clutter | 0-6 visual-only distractor shapes (box/cylinder/sphere) beside or behind the belt, never in the work area |
+  | table | pick-up surface height 0 to -4 cm (the robot stands on a pedestal) |
+  | robot start | initial TCP pose +-7 cm / +-0.4 rad around home (via IK) |
+  | image | per-episode sensor model: pixel noise, blur, exposure/bias (applied to the observation images) |
+  | physics | friction, block mass, belt speed, speed jumps |
+
+  Not randomised: arm/gripper dynamics, camera latency/lens distortion, object materials beyond friction, 3-D
+  background geometry, non-flat-topped objects (suction would need a different grasp model).
 * **Hard modes** (`EnvConfig`): `belt_speed_range`, `speed_change` (surprise speed jump), `occlusion_s` (a panel
   hides the target from the `front` camera — the wrist camera still sees it), `n_distractors`.
 
@@ -86,10 +95,10 @@ the library exists but the file does not). Rendering is correct either way, just
 
 | setting | expert success |
 |---|---|
-| default belt 0.02-0.07 m/s, distractor, full domain randomisation | 60/60 |
+| default belt 0.02-0.07 m/s, distractor, full domain randomisation (incl. all 9 source/target shape pairs) | 120/120 |
 | same, randomisation ranges x1.6 | 60/60 |
 | speed jump + occlusion | 40/40 (nominal scene) |
-| fast belt 0.08-0.14 m/s + speed jump + occlusion + randomisation | 58/60 |
+| fast belt 0.08-0.14 m/s + speed jump + occlusion + randomisation | 59/60 |
 
 `data/collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.

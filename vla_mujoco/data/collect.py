@@ -80,9 +80,7 @@ def main():
         occlusion_s=a.occlusion_s,
         n_distractors=a.distractors,
         dr_scale=a.dr_scale,
-        randomize_conveyor=not a.no_dr,
-        randomize_camera=not a.no_dr,
-        randomize_appearance=not a.no_dr,
+        **EnvConfig.dr_flags(not a.no_dr),
     )
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

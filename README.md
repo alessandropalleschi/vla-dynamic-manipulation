@@ -53,11 +53,12 @@ docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), lega
 * **Observations** — `front` / `wrist` / `overhead` RGB, 22-D proprioception, language instruction. Privileged state is
   confined to `info["priv"]`, so deployed policies never see it.
 * **Actions** — bounded Cartesian deltas `[dx, dy, dz, dyaw, vacuum]` resolved by IK.
-* **Domain randomisation** — conveyor position/yaw, camera poses and FOV, object colours/sizes, table/belt/robot tints
-  and lighting are resampled every episode (`--dr-scale`, `--no-dr`) so policies generalise across viewpoints and looks.
+* **Domain randomisation** — conveyor position/yaw, camera poses, **stacked/target object shapes** (cube, cuboid,
+  cylinder), textures, colours, lighting, background clutter, table height, robot start pose and camera sensor
+  noise/blur are resampled every episode (`--dr-scale`, `--no-dr`); see `docs/MUJOCO.md` for the full table.
 * **Hard modes** — belt speed range, surprise speed jumps, an occluder panel hiding the target from the front camera,
   distractor boxes (the instruction names colours, so language must be grounded).
-* **Expert** — stacks 60/60 randomised episodes (and 60/60 at 1.6× the randomisation range); 58/60 in the hardest
+* **Expert** — stacks 120/120 randomised episodes across all shape pairs (60/60 at 1.6× the randomisation range); 59/60 in the hardest
   combination of fast belt (0.08–0.14 m/s), speed jump and occlusion.
 * **Console scripts** after install: `vla-demo`, `vla-collect`, `vla-train`, `vla-eval`.
 

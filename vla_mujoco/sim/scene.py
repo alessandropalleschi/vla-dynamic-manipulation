@@ -160,6 +160,11 @@ def build_mjcf(img_size: int = 128) -> str:
         for i in range(6)
     )
 
+    clutter = "\n    ".join(
+        f'<body name="clutter{i}" mocap="true" pos="0 0 -5"><geom name="clutter{i}" type="box" size="0.03 0.03 0.03" '
+        f'rgba="0.5 0.5 0.5 1" contype="0" conaffinity="0"/></body>'
+        for i in range(6)
+    )
     box_geom = lambda half, rgba, mass: (  # noqa: E731
         f'<geom type="box" size="{half} {half} {half}" mass="{mass}" rgba="{rgba}" '
         f'class="obj" friction="1.0 0.01 0.001"/>'
@@ -179,6 +184,15 @@ def build_mjcf(img_size: int = 128) -> str:
     <material name="floor" texture="floor" texrepeat="6 6" texuniform="true" reflectance="0.0"/>
     <texture name="beltTex" type="2d" builtin="checker" rgb1="0.16 0.16 0.18" rgb2="0.30 0.30 0.33" width="64" height="64"/>
     <material name="belt" texture="beltTex" texrepeat="1 24" texuniform="false"/>
+    <!-- texture pool for objects / table / floor, picked per episode (colour is multiplied in via rgba) -->
+    <texture name="tx_check" type="2d" builtin="checker" rgb1="1 1 1" rgb2="0.55 0.55 0.55" width="64" height="64"/>
+    <texture name="tx_grad" type="2d" builtin="gradient" rgb1="1 1 1" rgb2="0.45 0.45 0.45" width="64" height="64"/>
+    <texture name="tx_speckle" type="2d" builtin="flat" rgb1="1 1 1" mark="random" random="0.25" markrgb="0.3 0.3 0.3" width="128" height="128"/>
+    <texture name="tx_stripe" type="2d" builtin="checker" rgb1="1 1 1" rgb2="0.6 0.6 0.6" width="8" height="64"/>
+    <material name="m_check" texture="tx_check" texrepeat="2 2" texuniform="false"/>
+    <material name="m_grad" texture="tx_grad" texuniform="false"/>
+    <material name="m_speckle" texture="tx_speckle" texuniform="false"/>
+    <material name="m_stripe" texture="tx_stripe" texrepeat="3 1" texuniform="false"/>
   </asset>
   <default>
     <default class="arm"><geom contype="1" conaffinity="2" rgba="0.88 0.88 0.9 1"/></default>
@@ -192,7 +206,7 @@ def build_mjcf(img_size: int = 128) -> str:
     <geom name="floor" type="plane" size="3 3 0.1" pos="0 0 -0.05" material="floor" contype="0" conaffinity="0"/>
     <geom name="table" type="box" size="0.8 0.85 0.025" pos="0.45 0 -0.025" rgba="0.62 0.55 0.45 1" class="obj"/>
     <!-- conveyor frame (static) and moving belt slab -->
-    <geom name="belt_frame" type="box" size="{BELT_HALF_W + 0.012} {BELT_HALF_L} {(BELT_TOP - 0.012) / 2}" pos="{BELT_X} 0 {(BELT_TOP - 0.012) / 2}" rgba="0.35 0.37 0.4 1" contype="0" conaffinity="0"/>
+    <geom name="belt_frame" type="box" size="{BELT_HALF_W + 0.012} {BELT_HALF_L} {(BELT_TOP - 0.012 + 0.1) / 2}" pos="{BELT_X} 0 {(BELT_TOP - 0.012 - 0.1) / 2}" rgba="0.35 0.37 0.4 1" contype="0" conaffinity="0"/>
     <geom name="rail_l" type="box" size="0.008 {BELT_HALF_L} 0.012" pos="{BELT_X - BELT_HALF_W - 0.009} 0 {BELT_TOP + 0.006}" rgba="0.8 0.6 0.1 1" class="obj"/>
     <geom name="rail_r" type="box" size="0.008 {BELT_HALF_L} 0.012" pos="{BELT_X + BELT_HALF_W + 0.009} 0 {BELT_TOP + 0.006}" rgba="0.8 0.6 0.1 1" class="obj"/>
     <body name="belt" pos="{BELT_X} 0 {BELT_TOP - 0.006}">
@@ -200,6 +214,7 @@ def build_mjcf(img_size: int = 128) -> str:
       <geom name="belt_top" type="box" size="{BELT_HALF_W} {BELT_HALF_L} 0.006" mass="30" material="belt" class="obj" friction="1.2 0.01 0.001"/>
     </body>
     <!-- robot -->
+    <geom name="pedestal" type="cylinder" size="0.1 0.1" pos="0 0 -0.1" rgba="0.3 0.32 0.35 1" contype="0" conaffinity="0"/>
     <body name="base" pos="0 0 0.003">
       <geom type="mesh" mesh="link_base" mass="{LINK_MASS[0]}" class="arm"/>
 {arm}    </body>
@@ -217,6 +232,8 @@ def build_mjcf(img_size: int = 128) -> str:
       {box_geom(TGT_HALF, "0.15 0.7 0.25 1", 0.5)}
     </body>
     <!-- occluder panel (parked below the floor until used) -->
+    <!-- visual-only clutter slots (mocap so they are not fused away); parked below the floor when unused -->
+    {clutter}
     <body name="occluder" mocap="true" pos="0.95 0 -2">
       <geom type="box" size="0.01 0.14 0.2" rgba="0.9 0.9 0.9 1" contype="0" conaffinity="0"/>
     </body>

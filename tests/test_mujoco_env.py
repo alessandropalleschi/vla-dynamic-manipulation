@@ -90,11 +90,11 @@ def test_randomisation_changes_views_and_can_be_disabled():
     a = make(seed=1)
     pos_a = [a.reset(seed=s) and a.model.cam_pos[a.model.camera("front").id].copy() for s in range(3)]
     assert not np.allclose(pos_a[0], pos_a[1])
-    off = make(seed=1, randomize_conveyor=False, randomize_camera=False, randomize_appearance=False)
+    off = make(seed=1, **EnvConfig.dr_flags(False))
     p0 = off.model.cam_pos[off.model.camera("front").id].copy()
     off.reset(seed=7)
     assert np.allclose(off.model.cam_pos[off.model.camera("front").id], p0)
-    assert off.belt_yaw == 0.0 and off.half["src"] == 0.05
+    assert off.belt_yaw == 0.0
 
 
 def test_expert_stacks_with_out_of_distribution_randomisation():
@@ -102,11 +102,59 @@ def test_expert_stacks_with_out_of_distribution_randomisation():
     assert wins >= 5
 
 
-def test_box_resize_keeps_inertia_consistent():
+def test_shape_change_keeps_inertia_and_bounds_consistent():
     env = make(seed=2)
-    env.reset(seed=2)
     m = env.model
-    b = env.boxes["src"]
-    h = env.half["src"]
-    assert np.isclose(m.geom_size[b["geom"]][0], h)
-    assert np.isclose(m.body_inertia[b["body"]][0], m.body_mass[b["body"]] * (2 * h) ** 2 / 6)
+    seen = set()
+    for seed in range(12):
+        env.reset(seed=seed)
+        for n in ("src", "tgt", "dist"):
+            b = env.boxes[n]
+            seen.add(env.kind[n])
+            assert np.isclose(m.geom_size[b["geom"]][1 if env.shape[n] == "cylinder" else 2], env.half[n])
+            assert np.all(m.body_inertia[b["body"]] > 0)
+            assert m.geom_rbound[b["geom"]] >= env.half[n]
+    assert {"cube", "cylinder"} <= seen
+
+
+def test_expert_stacks_every_shape_combination():
+    combos, wins = set(), 0
+    for s in range(30):
+        env = make(seed=s)
+        info = run_expert(env, s)
+        combos.add((env.kind["src"], env.kind["tgt"]))
+        wins += info["success"]
+    assert len(combos) >= 6  # cube/cuboid/cylinder pairs are all being exercised
+    assert wins >= 29
+
+
+def test_table_height_clutter_robot_start_and_sensor_randomisation():
+    env = make(seed=3)
+    tz, starts, clutter, params = set(), set(), set(), set()
+    for s in range(8):
+        env.reset(seed=s)
+        tz.add(round(env.table_z, 3))
+        starts.add(tuple(env.ee_cmd.round(3)))
+        clutter.add(env.n_clutter)
+        params.add(round(env.img_params["noise"], 4))
+        assert -0.05 <= env.table_z <= 0.0
+        # the block rests on the (lowered) table
+        assert abs(env.box_pose("src")[0][2] - (env.table_z + env.half["src"])) < 2e-3
+    assert len(tz) > 1 and len(starts) > 1 and len(clutter) > 1 and len(params) > 1
+
+
+def test_all_randomisation_can_be_disabled():
+    off = make(seed=1, randomize_physics=False, **EnvConfig.dr_flags(False))
+    off.reset(seed=5)
+    assert off.kind["src"] == "cube" and off.half["src"] == 0.05 and off.table_z == 0.0
+    assert off.n_clutter == 0 and off.belt_yaw == 0.0
+    assert off.img_params == {"noise": 0.0, "blur": 0.0, "gain": 1.0, "bias": 0.0}
+    assert np.allclose(off.ee_cmd, off.home_tcp, atol=1e-3)
+
+
+def test_sensor_model_changes_pixels_but_keeps_dtype():
+    env = DynamicStackEnv(EnvConfig(seed=0, img_size=32, cameras=("front",)))
+    env.img_params = {"noise": 0.03, "blur": 0.5, "gain": 1.1, "bias": 0.02}
+    raw = env.render("front")
+    out = env._sensor(raw)
+    assert out.dtype == np.uint8 and out.shape == raw.shape and not np.array_equal(out, raw)
