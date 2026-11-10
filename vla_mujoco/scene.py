@@ -21,9 +21,20 @@ BELT_X = 0.62
 BELT_TOP = 0.06
 BELT_HALF_W = 0.15
 BELT_HALF_L = 1.2
-TGT_HALF = 0.04          # target ("lower") box half-size
-SRC_HALF = 0.03          # source ("upper") block half-size
-TOOL_TCP_Z = 0.122       # flange -> cup face along tool z (m)
+TGT_HALF = 0.06          # target ("lower") box half-size (12 cm cube)
+SRC_HALF = 0.05          # source ("upper") block half-size (10 cm cube: must cover all 4 cups)
+
+# VGC10 geometry, mirrored from scripts/uf850_tool_urdf.py and the generated
+# simulation/generated/uf850_vgc10.urdf used by the Gazebo stack (link6 frame, tool +z outward):
+#   mount 15 mm out from link6, flipped 180 deg about x; body box 101x100x100 mm;
+#   4 cups, 40 mm dia (r=20.2 mm), 44 mm pitch; TCP at the cup face.
+TOOL_MOUNT_Z = 0.015
+TOOL_TCP_Z = 0.1894      # link6 -> cup face
+CUP_R = 0.0202
+CUP_XY = 0.022
+CUP_TOP_Z = 0.1051       # link6 z where the single-cup STL starts (body -0.0901 flipped)
+VGC10_MESH_DIR = (Path(__file__).resolve().parents[1] / "external" / "onrobot_ros_assets"
+                  / "onrobot_vg_description" / "meshes" / "vgc10" / "visual")
 
 # (xyz, rpy) of each joint frame relative to its parent link (uf850_default_kinematics.yaml)
 JOINT_FRAMES = [
@@ -61,9 +72,12 @@ def _f(v) -> str:
 
 
 def build_mjcf(img_size: int = 128) -> str:
+    have_vgc = (VGC10_MESH_DIR / "base_link_4cups.stl").is_file() and (VGC10_MESH_DIR / "suction_cup_1cup.stl").is_file()
+    vgc_assets = (f'''<mesh name="vgc10_body" file="{VGC10_MESH_DIR / "base_link_4cups.stl"}"/>
+    <mesh name="vgc10_cup" file="{VGC10_MESH_DIR / "suction_cup_1cup.stl"}"/>''' if have_vgc else "")
     meshes = "\n    ".join(
         f'<mesh name="{n}" file="{n}.stl"/>'
-        for n in ["link_base", "link1", "link2", "link3", "link4", "link5", "link6"])
+        for n in ["link_base", "link1", "link2", "link3", "link4", "link5", "link6"]) + "\n    " + vgc_assets
 
     # nested arm bodies
     arm = ""
@@ -77,16 +91,23 @@ def build_mjcf(img_size: int = 128) -> str:
                 f'{indent}  <geom type="mesh" mesh="link{i}" mass="{LINK_MASS[i]}" class="arm"/>\n')
         closers.append(f"{indent}</body>\n")
         indent += "  "
-    # tool (VGC10-like): mount plate, body, 4 suction cups (cups are non-colliding)
-    tool = f"""{indent}<body name="tool" gravcomp="1">
-{indent}  <geom type="cylinder" size="0.04 0.005" pos="0 0 0.005" mass="0.1" class="toolcol"/>
-{indent}  <geom type="box" size="0.0505 0.05 0.05" pos="0 0 0.06" mass="0.7" class="toolcol"/>
-{indent}  <geom type="cylinder" size="0.015 0.006" pos="0.025 0.025 0.116" class="cup"/>
-{indent}  <geom type="cylinder" size="0.015 0.006" pos="-0.025 0.025 0.116" class="cup"/>
-{indent}  <geom type="cylinder" size="0.015 0.006" pos="0.025 -0.025 0.116" class="cup"/>
-{indent}  <geom type="cylinder" size="0.015 0.006" pos="-0.025 -0.025 0.116" class="cup"/>
-{indent}  <site name="tcp" pos="0 0 {TOOL_TCP_Z}" size="0.004" rgba="1 0 0 1"/>
-{indent}  <camera name="wrist" pos="0.0 0.075 0.09" quat="0 1 0 0" fovy="85"/>
+    # tool: VGC10, same frames as the Gazebo URDF. Real OnRobot STLs are visual-only (as in the
+    # Gazebo stack); collision is the 101x100x100 mm box proxy. Cups do not collide (suction is a
+    # constraint model, see env.py).
+    cx = CUP_XY
+    cup_pos = [(-cx, cx), (cx, cx), (-cx, -cx), (cx, -cx)]
+    if have_vgc:
+        vis = (f'{indent}  <geom type="mesh" mesh="vgc10_body" pos="0 0 {TOOL_MOUNT_Z}" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
+               + "".join(f'{indent}  <geom type="mesh" mesh="vgc10_cup" pos="{x} {y} {CUP_TOP_Z}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
+                         for x, y in cup_pos))
+    else:  # fallback if the OnRobot meshes are not present
+        vis = (f'{indent}  <geom type="box" size="0.0505 0.05 0.045" pos="0 0 0.06" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
+               + "".join(f'{indent}  <geom type="cylinder" size="{CUP_R} 0.042" pos="{x} {y} {TOOL_TCP_Z - 0.042}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
+                         for x, y in cup_pos))
+    tool = f"""{indent}<body name="tool" pos="0 0 0" gravcomp="1">
+{indent}  <geom type="box" size="0.0505 0.05 0.05" pos="0 0 {TOOL_MOUNT_Z + 0.05}" mass="0.774" class="toolcol"/>
+{vis}{indent}  <site name="tcp" pos="0 0 {TOOL_TCP_Z}" size="0.004" rgba="1 0 0 1"/>
+{indent}  <camera name="wrist" pos="0.0 0.075 0.12" quat="0 1 0 0" fovy="85"/>
 {indent}</body>
 """
     arm += tool + "".join(reversed(closers))
@@ -118,7 +139,7 @@ def build_mjcf(img_size: int = 128) -> str:
   <default>
     <default class="arm"><geom contype="1" conaffinity="2" rgba="0.88 0.88 0.9 1"/></default>
     <default class="toolcol"><geom contype="1" conaffinity="2" rgba="0.25 0.27 0.3 1"/></default>
-    <default class="cup"><geom contype="0" conaffinity="0" rgba="0.05 0.05 0.05 1" mass="0.005"/></default>
+    <default class="toolvis"><geom contype="0" conaffinity="0" group="1" mass="0"/></default>
     <default class="obj"><geom contype="2" conaffinity="3" condim="3"/></default>
   </default>
   <worldbody>
@@ -141,15 +162,15 @@ def build_mjcf(img_size: int = 128) -> str:
     <!-- manipulable objects -->
     <body name="src" pos="0.3 0.3 {SRC_HALF + 0.001}">
       <freejoint name="src_free"/>
-      {box_geom(SRC_HALF, "0.85 0.15 0.15 1", 0.12)}
+      {box_geom(SRC_HALF, "0.85 0.15 0.15 1", 0.2)}
     </body>
     <body name="tgt" pos="{BELT_X} -0.4 {BELT_TOP + TGT_HALF + 0.001}">
       <freejoint name="tgt_free"/>
-      {box_geom(TGT_HALF, "0.15 0.3 0.85 1", 0.3)}
+      {box_geom(TGT_HALF, "0.15 0.3 0.85 1", 0.5)}
     </body>
     <body name="dist" pos="{BELT_X} -0.7 {BELT_TOP + TGT_HALF + 0.001}">
       <freejoint name="dist_free"/>
-      {box_geom(TGT_HALF, "0.15 0.7 0.25 1", 0.3)}
+      {box_geom(TGT_HALF, "0.15 0.7 0.25 1", 0.5)}
     </body>
     <!-- occluder panel (parked below the floor until used) -->
     <body name="occluder" mocap="true" pos="0.95 0 -2">

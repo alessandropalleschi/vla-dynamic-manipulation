@@ -28,7 +28,7 @@ import math
 import mujoco
 import numpy as np
 
-from .scene import BELT_TOP, BELT_X, SRC_HALF, TGT_HALF, TOOL_TCP_Z, build_mjcf
+from .scene import BELT_TOP, BELT_X, CUP_R, CUP_XY, SRC_HALF, TGT_HALF, build_mjcf
 
 PROPRIO_DIM = 22
 MAX_STEP_M = 0.015       # per control step at action = 1  (0.3 m/s at 20 Hz)
@@ -62,7 +62,7 @@ class EnvConfig:
     randomize_physics: bool = True
     render: bool = True
     success_hold_s: float = 0.5
-    place_tol_m: float = 0.015
+    place_tol_m: float = 0.012
     extra: dict = field(default_factory=dict)
 
 
@@ -187,13 +187,13 @@ class DynamicStackEnv:
         if cfg.randomize_physics:
             m.geom_friction[self.boxes["src"]["geom"], 0] = r.uniform(0.7, 1.2)
             m.geom_friction[self.boxes["tgt"]["geom"], 0] = r.uniform(0.7, 1.2)
-            m.body_mass[self.boxes["src"]["body"]] = r.uniform(0.08, 0.2)
+            m.body_mass[self.boxes["src"]["body"]] = r.uniform(0.15, 0.35)
         self.instruction = (f"stack the {self.src_color} block on the {self.tgt_color} box "
                             f"moving on the conveyor")
 
         # source block on the table (right of the belt, reachable), random heading
         self.src_yaw = float(r.uniform(-0.5, 0.5))
-        sx, sy = r.uniform(0.25, 0.33), r.uniform(0.18, 0.38)
+        sx, sy = r.uniform(0.24, 0.31), r.uniform(0.18, 0.38)
         self._set_box("src", (sx, sy, SRC_HALF + 0.0005), self.src_yaw)
         # target + distractor on the belt, upstream (negative y)
         # start further upstream on fast belts so the target is still reachable after the pick
@@ -282,10 +282,18 @@ class DynamicStackEnv:
             pos, Rb = self.box_pose(name)
             n = Rb[:, 2]
             half = self.box_half(name)
-            gap_vec = tcp - (pos + n * half)
-            gap = float(gap_vec @ n)
-            lateral = float(np.linalg.norm(gap_vec - gap * n))
-            if -0.004 <= gap <= 0.008 and lateral <= 0.015 and float(tool_z @ n) < -0.97:
+            top = pos + n * half
+            gap = float((tcp - top) @ n)
+            if not (-0.004 <= gap <= 0.008 and float(tool_z @ n) < -0.97):
+                continue
+            # all four cup centres (VGC10: +-CUP_XY) must lie on the top face, with >= half a cup radius of margin
+            ok = True
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    c = tcp + R @ np.array([sx * CUP_XY, sy * CUP_XY, 0.0]) - top
+                    u, v = Rb[:, 0] @ c, Rb[:, 1] @ c
+                    ok &= abs(u) <= half - 0.5 * CUP_R and abs(v) <= half - 0.5 * CUP_R
+            if ok:
                 return name
         return None
 

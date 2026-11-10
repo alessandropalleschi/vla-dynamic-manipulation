@@ -30,10 +30,15 @@ python -m vla_mujoco.evaluate --expert --episodes 50 --speed-range 0.08 0.14
 ## Environment (`vla_mujoco/env.py`)
 * **Robot**: UF850 kinematics, joint limits and (collision) meshes from UFACTORY `xarm_ros2` (BSD-3, license
   in `assets/uf850/`). Arm is gravity-compensated with position actuators; masses are approximate.
-* **Tool**: VGC10-sized body, 4 cups, TCP at the cup face. Vacuum is modelled as a weld constraint that engages
-  only after the cups have sealed on a box top face (gap < 8 mm, lateral < 15 mm, tilt < 14 deg) for 0.35 s and
-  releases 0.2 s after the command drops. This is a *model*, not a measured VGC10 — calibrate before drawing
-  conclusions about real hardware.
+* **Tool**: the same VGC10 setup as the Gazebo stack (`scripts/uf850_tool_urdf.py`): mount 15 mm from link6 flipped
+  180 deg, 101x100x100 mm body proxy for collision, 4 cups of 40 mm / 44 mm pitch, TCP 0.1894 m from link6. The
+  real OnRobot `base_link_4cups.stl` / `suction_cup_1cup.stl` (MIT, `external/onrobot_ros_assets`) are used as
+  **visual only**, exactly as in the Gazebo stack; if they are missing a primitive fallback is built.
+  Vacuum is a weld constraint that engages only after all four cup centres lie on a box top face (with margin),
+  the tool is within 8 mm / 14 deg, for 0.35 s; it releases 0.2 s after the command drops. Because the cups span
+  ~84 mm, blocks are 10 cm (source) and 12 cm (target) cubes. This is a *model*, not a measured VGC10, and
+  `config/vgc10.yaml` (30 mm / 50 mm cups) disagrees with the URDF generator (40 mm / 44 mm); the generator
+  values are used. Channels A/B are not modelled separately.
 * **Conveyor**: a belt slab on a velocity-driven slide joint, so boxes are carried by real friction, and can slip.
 * **Task**: pick the *source block* from the table, stack it on the *target box* (one of two boxes on the belt;
   the language instruction names the colours, so the distractor requires language grounding).
@@ -48,13 +53,13 @@ python -m vla_mujoco.evaluate --expert --episodes 50 --speed-range 0.08 0.14
 
 ## Expert and data
 `StackExpert` (privileged) does approach → grasp → lift → constant-velocity intercept → closed-loop track-and-descend
-→ timed release. Current measured success (this repo, `tests/` + ad-hoc sweeps over 30-60 seeds):
+→ timed release. Current measured success (this repo, `tests/` + ad-hoc sweeps over 40 seeds each):
 
 | setting | expert success |
 |---|---|
-| default belt 0.02-0.07 m/s, distractor | 60/60 |
+| default belt 0.02-0.07 m/s, distractor | 40/40 |
 | speed jump + occlusion | 40/40 |
-| fast belt 0.08-0.14 m/s | 39/40 |
+| fast belt 0.08-0.14 m/s | 40/40 |
 
 `collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.
@@ -70,7 +75,7 @@ diffusion/flow matching.
 ## Known limitations / next steps
 * Suction is a constraint model; no vacuum leakage, payload limits or cup compliance.
 * Single scripted skill; no re-grasp or failure recovery in the expert.
-* Meshes are the collision STLs (visual DAEs are not vendored); IK uses a fixed tool-down orientation.
+* Arm meshes are the UFACTORY collision STLs (visual DAEs not vendored); IK uses a fixed tool-down orientation.
 * The learned-policy numbers in the PR description come from a short CPU run and are not a benchmark.
 * Natural next steps: sim-to-real camera calibration, ROS 2 command adapter around the same action interface,
   LeRobot/RLDS export, larger/pretrained backbones, DAgger with the expert.
