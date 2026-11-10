@@ -42,11 +42,10 @@ def main():
         from .policy import PolicyRunner, VLAPolicy
 
         ck = torch.load(a.policy, map_location="cpu")
-        cams = tuple(ck["args"]["cameras"])
-        model = VLAPolicy(cams, arch=ck["args"]["arch"], chunk=ck["args"]["chunk"])
-        model.load_state_dict(ck["model"])
+        model = VLAPolicy.from_checkpoint(ck)
+        cams = tuple(model.cameras)
         dev = ("cuda" if torch.cuda.is_available() else "cpu") if a.device == "auto" else a.device
-        runner = PolicyRunner(model, device=dev, exec_horizon=a.exec_horizon)
+        runner = PolicyRunner(model, device=dev, exec_horizon=a.exec_horizon)  # rebuilds the text backend
     elif not a.expert:
         ap.error("pass --policy or --expert")
     results = []

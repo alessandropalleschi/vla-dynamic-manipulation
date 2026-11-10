@@ -30,9 +30,9 @@ make install                  # = pip install -e ".[train,dev]"
 export MUJOCO_GL=egl          # headless GPU/software rendering (glfw if you have a display)
 make test                     # simulator tests, ~3 s
 make demo                     # expert episode -> demo.gif
-make collect                  # 200 expert demos -> data/mj_demos
+make collect                  # 300 mixed-task expert demos -> data/mj_demos
 make gpu-check                # is CUDA + GPU rendering working?
-make train                    # behaviour-cloning baseline -> runs/gru (uses the GPU + bf16 automatically)
+make train                    # GRU belief + pretrained text encoder + flow-matching head -> runs/gru_flow
 ```
 A GL-less container needs `apt-get install libegl1` (Mesa software rendering is then used).
 
@@ -68,6 +68,9 @@ docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), lega
   distractor boxes (the instruction names colours, so language must be grounded).
 * **Expert** — solves 100/100 mixed multi-object tasks with full randomisation, 79/80 in crowded scenes at 1.5× randomisation, and 58/60
   with fast belts, speed jumps and occlusion (see `docs/MUJOCO.md`).
+* **Policy** — image patch tokens, text tokens (hashed / trainable / frozen pretrained encoder) and proprioception are
+  fused by a transformer, then a memory core (`mlp | stack | gru`) and an action head (`regress | flow`). The trainer has
+  a validation split, EMA, resumable checkpoints and a *language probe* that measures how much the policy uses the text.
 * **Console scripts** after install: `vla-demo`, `vla-collect`, `vla-train`, `vla-eval`.
 
 Read [`docs/MUJOCO.md`](docs/MUJOCO.md) for the gripper model, success definition, limitations and next steps.

@@ -143,13 +143,41 @@ Control rate x fixed command latency (`python -m vla_mujoco.sweep_rate`, 30 `sta
 `data/collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.
 
-## Policy (`vla/policy.py`, `vla/train.py`, `vla/evaluate.py`)
-Compact baseline: CNN (spatial-softmax) per camera + word-level text encoder + proprio MLP -> action **chunks**
-(8 steps), with an auxiliary head that regresses the target's position relative to the tool and belt velocity
-(a belief-style training signal; unused at inference). `--arch {mlp,stack,gru}` gives the memory ablation from
-`docs/next_steps.md` (no memory / frame window / recurrent). This is a *scaffold*: no pretrained weights are
-downloaded. To scale up, swap `ImageEncoder`/`TextEncoder` for a frozen ViT + language model and the head for
-diffusion/flow matching.
+## Policy (`vla/policy.py`, `vla/text.py`, `vla/train.py`, `vla/evaluate.py`)
+```
+cameras -> CNN -> patch tokens --+
+text -> backend/encoder ---------+--> fusion transformer (query token) -> per-step feature
+proprio -------------------------+                                         |
+                                       memory: mlp | stack | gru  ->  belief z_t
+                                                                            |
+              heads: action chunk (regress | flow matching), vacuum (Bernoulli), aux (target-relative position,
+                     target speed, phase, step)
+```
+* **Language grounding**: text tokens, image patch tokens and proprioception attend to each other in a small
+  transformer, so "the second cube from the conveyor" can select an object in the image (late concatenation of pooled
+  features cannot).
+* **Text encoders** (`--text-encoder`):
+  `bow` hashed words embedded from scratch (baseline) | `scratch` the same ids contextualised by a small trainable
+  transformer | `pretrained` token embeddings from a **frozen** Hugging Face encoder
+  (`--text-name`, default `sentence-transformers/all-MiniLM-L6-v2`) with a trainable adapter. Embeddings are computed
+  once per unique instruction and cached, so the language model costs nothing per step, and it is not stored in the
+  checkpoint (it is re-loaded for evaluation).
+* **Action head** (`--head`): `regress` (L1) or `flow` (conditional flow matching on the action chunk, Euler sampling,
+  `--flow-steps`). The vacuum command is a separate Bernoulli head. Chunked execution: the belief updates every step,
+  a new chunk is drawn every `--exec-horizon` steps.
+* **Memory** (`--arch`): `mlp` | `stack` | `gru`, trained with truncated BPTT and a burn-in (`--burn-in`).
+* **Trainer**: episode-level train/val split, EMA weights, warm-up + cosine LR, bf16 (`--amp`), grad clipping, resumable
+  (`--resume`), background batch prefetching, `log.csv`, `last.pt` / `best.pt` / `policy.pt` (final EMA).
+* **Language probe**: every validation reports the action error with the correct instruction and with an instruction from
+  another episode; `lang_gap = wrong - correct` is how much the policy actually uses the text (0 means it ignores it).
+* The auxiliary heads are training signals only; inference never sees privileged state.
+
+```bash
+python -m vla_mujoco.data.collect --out data/mj_lang --episodes 300 --img-size 64 --task random --distractors 2
+python -m vla_mujoco.vla.train --data data/mj_lang --out runs/gru_pre --arch gru --head flow \
+    --text-encoder pretrained --steps 20000 --amp          # on a GPU
+python -m vla_mujoco.vla.evaluate --policy runs/gru_pre/best.pt --episodes 50 --task random
+```
 
 ## Known limitations / next steps
 * Suction is a constraint model; no vacuum leakage, payload limits or cup compliance.

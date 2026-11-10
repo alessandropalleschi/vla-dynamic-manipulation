@@ -22,11 +22,11 @@ format:
 demo:               ## render one expert episode to demo.gif
 	$(PY) -m vla_mujoco.viz --seed 3 --out demo.gif
 
-collect:            ## 200 expert demos -> data/mj_demos
-	$(PY) -m vla_mujoco.data.collect --out data/mj_demos --episodes 200 --workers 4
+collect:            ## 300 mixed-task expert demos (crowded scenes) -> data/mj_demos
+	$(PY) -m vla_mujoco.data.collect --out data/mj_demos --episodes 300 --workers 4 --img-size 64 --task random --distractors 2 --table-distractors 1
 
-train:
-	$(PY) -m vla_mujoco.vla.train --data data/mj_demos --arch gru --steps 20000 --amp --out runs/gru
+train:              ## belief (GRU) + pretrained text encoder + flow-matching head
+	$(PY) -m vla_mujoco.vla.train --data data/mj_demos --arch gru --head flow --text-encoder pretrained --steps 20000 --amp --out runs/gru_flow
 
 eval-expert:
 	$(PY) -m vla_mujoco.vla.evaluate --expert --episodes 50

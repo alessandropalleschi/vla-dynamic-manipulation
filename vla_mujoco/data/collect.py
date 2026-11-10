@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -94,7 +95,8 @@ def main():
     (out / "config.json").write_text(json.dumps({**cfg, "noise": a.noise}, indent=1))
     jobs = [(a.seed0 + i, cfg, a.noise) for i in range(a.episodes)]
     kept = 0
-    with ProcessPoolExecutor(a.workers) as ex:
+    # spawn (not fork): forking after torch/OpenMP or GL contexts exist can deadlock
+    with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
         for seed, ok, ep in ex.map(_job, jobs):
             if ok:
                 np.savez_compressed(out / f"ep_{seed:06d}.npz", **ep)
