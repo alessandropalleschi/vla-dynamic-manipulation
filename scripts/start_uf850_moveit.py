@@ -17,7 +17,8 @@ def main():
     tree, root_frame, joints, limits = parse_robot(URDF_PATH)
     config = make_moveit_parameters(urdf, make_srdf(tree, joints), limits)
     config_file = Path('/tmp/uf850_move_group_plan_only.yaml')
-    config_file.write_text(yaml.safe_dump({'move_group': {'ros__parameters': config}}, sort_keys=False))
+    config['use_sim_time'] = True
+    config_file.write_text(yaml.safe_dump({'/**': {'ros__parameters': config}}, sort_keys=False))
     print(f'Planning root: {root_frame}', flush=True)
     print('MoveIt: PLAN ONLY. Controller execution is disabled.', flush=True)
     print('Warning: planning collision boxes are injected by plan_uf850_pickup.py, not by startup.', flush=True)
