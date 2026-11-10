@@ -1,0 +1,502 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="uf850">
+  <material name="Black">
+    <color rgba="0.0 0.0 0.0 1.0" />
+  </material>
+  <material name="Red">
+    <color rgba="0.8 0.0 0.0 1.0" />
+  </material>
+  <material name="White">
+    <color rgba="1.0 1.0 1.0 1.0" />
+  </material>
+  <material name="Silver">
+    <color rgba="0.753 0.753 0.753 1.0" />
+  </material>
+  <link name="world" />
+  <joint name="world_joint" type="fixed">
+    <parent link="world" />
+    <child link="link_base" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <link name="link_base">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00025599 -2.8579E-06 0.085749" />
+      <mass value="2.2684" />
+      <inertia ixx="0.0063949" ixy="-8.0653E-07" ixz="-2.1841E-05" iyy="0.0064375" iyz="-4.2181E-07" izz="0.0048631" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link_base.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link_base.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <link name="link1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="5.7e-05 0.013842 -0.02055" />
+      <mass value="4.807" />
+      <inertia ixx="0.022001728999999998" ixy="-1.1152e-05" ixz="6.7380000000000005e-06" iyy="0.018900685" iyz="-0.000364084" izz="0.012270188" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link1.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link1.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint1" type="revolute">
+    <parent link="link_base" />
+    <child link="link1" />
+    <origin rpy="0 0 0" xyz="0 0 0.364" />
+    <axis xyz="0 0 1" />
+    <limit effort="382.5" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.14" />
+    <dynamics damping="16.6" friction="9.6" />
+  </joint>
+  <link name="link2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.323425 9.5e-05 0.007586" />
+      <mass value="3.28" />
+      <inertia ixx="0.0076119840000000005" ixy="-3.3561e-05" ixz="0.008240021" iyy="0.06420854" iyz="-1.6145e-05" izz="0.06117569999999999" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link2.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link2.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint2" type="revolute">
+    <parent link="link1" />
+    <child link="link2" />
+    <origin rpy="1.5708 -1.5708 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="382.5" lower="-2.3038346" upper="2.3038346" velocity="3.14" />
+    <dynamics damping="12.5" friction="12.1" />
+  </joint>
+  <link name="link3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.128834 0.11341 0.00978" />
+      <mass value="2.237" />
+      <inertia ixx="0.009920314" ixy="-0.005137841" ixz="0.0026284259999999997" iyy="0.008923236000000001" iyz="0.002412869" izz="0.014284809999999998" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link3.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link3.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint3" type="revolute">
+    <parent link="link2" />
+    <child link="link3" />
+    <origin rpy="-3.1416 0 -1.5708" xyz="0.39 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="243.525" lower="-4.2236968" upper="0.061087" velocity="3.14" />
+    <dynamics damping="4.0" friction="5.5" />
+  </joint>
+  <link name="link4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000266 -0.03833 -0.101915" />
+      <mass value="2.041" />
+      <inertia ixx="0.019918597" ixy="-2.3185e-05" ixz="5.816899999999999e-05" iyy="0.017515193999999998" iyz="0.005878608" izz="0.004283807" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link4.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link4.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint4" type="revolute">
+    <parent link="link3" />
+    <child link="link4" />
+    <origin rpy="-1.5708 0 0" xyz="0.15 0.426 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="117.3" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.14" />
+    <dynamics damping="3.6" friction="2.2" />
+  </joint>
+  <link name="link5">
+    <inertial>
+      <origin rpy="0 0 0" xyz="5.7e-05 -0.015267 -0.001015" />
+      <mass value="1.385" />
+      <inertia ixx="0.0020774540000000003" ixy="-5.026e-06" ixz="-6.989999999999999e-07" iyy="0.001109183" iyz="6.747e-06" izz="0.0020357" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link5.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link5.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint5" type="revolute">
+    <parent link="link4" />
+    <child link="link5" />
+    <origin rpy="-1.5708 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="38.25" lower="-2.1642" upper="2.1642" velocity="3.14" />
+    <dynamics damping="3.45" friction="3.2" />
+  </joint>
+  <link name="link6">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000484 -0.000334 -0.014217" />
+      <mass value="0.225" />
+      <inertia ixx="0.000130252" ixy="-4.285e-06" ixz="3.19e-07" iyy="0.000128308" iyz="-3.86e-07" izz="0.00023249999999999999" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/visual/link6.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <material name="White" />
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="file:///workspace/external/xarm_ws/install/xarm_description/share/xarm_description/meshes/uf850/collision/link6.stl" />
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+    </collision>
+  </link>
+  <joint name="joint6" type="revolute">
+    <parent link="link5" />
+    <child link="link6" />
+    <origin rpy="1.5708 0 0" xyz="0 -0.09 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="38.25" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.14" />
+    <dynamics damping="3.4" friction="1.1" />
+  </joint>
+  <transmission name="tran1">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint1">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor1">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="tran2">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint2">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor2">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="tran3">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint3">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor3">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="tran4">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint4">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor4">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="tran5">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint5">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor5">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="tran6">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint6">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor6">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>100</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <gazebo reference="link_base">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link1">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link2">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link3">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link4">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link5">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="link6">
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <link name="link_eef" />
+  <joint name="joint_eef" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="link6" />
+    <child link="link_eef" />
+  </joint>
+  <link name="vgc10_body">
+    <inertial>
+      <origin xyz="0 0 -0.050" rpy="0 0 0" />
+      <mass value="0.774000" />
+      <inertia ixx="0.001290000" ixy="0" ixz="0" iyy="0.001302964" iyz="0" izz="0.001302964" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 -0.050" rpy="0 0 0" />
+      <geometry>
+        <box size="0.101 0.100 0.100" />
+      </geometry>
+    </collision>
+    <visual name="vgc10_manufacturer_style_4cup_stl">
+      <origin xyz="0 0 0" rpy="3.141592653589793 0.0 0.0" />
+      <geometry>
+        <mesh filename="/workspace/external/onrobot_ros_assets/onrobot_vg_description/meshes/vgc10/visual/base_link_4cups.stl" scale="1 1 1" />
+      </geometry>
+      <material name="vgc10_dark_gray">
+        <color rgba="0.24 0.26 0.29 1" />
+      </material>
+    </visual>
+    <visual name="vgc10_body_cup_a1">
+      <origin xyz="-0.022000 0.022000 -0.0901000" rpy="3.141592653589793 0 0" />
+      <geometry>
+        <mesh filename="file:///workspace/simulation/meshes/vgc10/suction_cup_1cup.stl" scale="1 1 1" />
+      </geometry>
+      <material name="vgc10_single_cup_a1">
+        <color rgba="0.08 0.09 0.10 1" />
+      </material>
+    </visual>
+    <visual name="vgc10_body_cup_a2">
+      <origin xyz="0.022000 0.022000 -0.0901000" rpy="3.141592653589793 0 0" />
+      <geometry>
+        <mesh filename="file:///workspace/simulation/meshes/vgc10/suction_cup_1cup.stl" scale="1 1 1" />
+      </geometry>
+      <material name="vgc10_single_cup_a2">
+        <color rgba="0.08 0.09 0.10 1" />
+      </material>
+    </visual>
+    <visual name="vgc10_body_cup_b1">
+      <origin xyz="-0.022000 -0.022000 -0.0901000" rpy="3.141592653589793 0 0" />
+      <geometry>
+        <mesh filename="file:///workspace/simulation/meshes/vgc10/suction_cup_1cup.stl" scale="1 1 1" />
+      </geometry>
+      <material name="vgc10_single_cup_b1">
+        <color rgba="0.08 0.09 0.10 1" />
+      </material>
+    </visual>
+    <visual name="vgc10_body_cup_b2">
+      <origin xyz="0.022000 -0.022000 -0.0901000" rpy="3.141592653589793 0 0" />
+      <geometry>
+        <mesh filename="file:///workspace/simulation/meshes/vgc10/suction_cup_1cup.stl" scale="1 1 1" />
+      </geometry>
+      <material name="vgc10_single_cup_b2">
+        <color rgba="0.08 0.09 0.10 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="uf850_to_vgc10" type="fixed">
+    <parent link="link6" />
+    <child link="vgc10_body" />
+    <origin xyz="0 0 0.015" rpy="3.141592653589793 0 0" />
+  </joint>
+  <link name="vgc10_cup_a1">
+    <inertial>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <mass value="0.010000" />
+      <inertia ixx="0.000000682" ixy="0" ixz="0" iyy="0.000000682" iyz="0" izz="0.000001125" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02020" length="0.012" />
+      </geometry>
+    </collision>
+    <collision name="vgc10_shaft_a1">
+      <origin xyz="0 0 0.0344" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.076" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="vgc10_cup_a1_fixed" type="fixed">
+    <parent link="vgc10_body" />
+    <child link="vgc10_cup_a1" />
+    <origin xyz="-0.022000 0.022000 -0.162395921" rpy="0 0 0" />
+  </joint>
+  <link name="vgc10_cup_a2">
+    <inertial>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <mass value="0.010000" />
+      <inertia ixx="0.000000682" ixy="0" ixz="0" iyy="0.000000682" iyz="0" izz="0.000001125" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02020" length="0.012" />
+      </geometry>
+    </collision>
+    <collision name="vgc10_shaft_a2">
+      <origin xyz="0 0 0.0344" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.076" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="vgc10_cup_a2_fixed" type="fixed">
+    <parent link="vgc10_body" />
+    <child link="vgc10_cup_a2" />
+    <origin xyz="0.022000 0.022000 -0.162395921" rpy="0 0 0" />
+  </joint>
+  <link name="vgc10_cup_b1">
+    <inertial>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <mass value="0.010000" />
+      <inertia ixx="0.000000682" ixy="0" ixz="0" iyy="0.000000682" iyz="0" izz="0.000001125" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02020" length="0.012" />
+      </geometry>
+    </collision>
+    <collision name="vgc10_shaft_b1">
+      <origin xyz="0 0 0.0344" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.076" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="vgc10_cup_b1_fixed" type="fixed">
+    <parent link="vgc10_body" />
+    <child link="vgc10_cup_b1" />
+    <origin xyz="-0.022000 -0.022000 -0.162395921" rpy="0 0 0" />
+  </joint>
+  <link name="vgc10_cup_b2">
+    <inertial>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <mass value="0.010000" />
+      <inertia ixx="0.000000682" ixy="0" ixz="0" iyy="0.000000682" iyz="0" izz="0.000001125" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 -0.006" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.02020" length="0.012" />
+      </geometry>
+    </collision>
+    <collision name="vgc10_shaft_b2">
+      <origin xyz="0 0 0.0344" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.011" length="0.076" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="vgc10_cup_b2_fixed" type="fixed">
+    <parent link="vgc10_body" />
+    <child link="vgc10_cup_b2" />
+    <origin xyz="0.022000 -0.022000 -0.162395921" rpy="0 0 0" />
+  </joint>
+  <link name="vgc10_tcp" />
+  <joint name="vgc10_tcp_fixed" type="fixed">
+    <parent link="vgc10_body" />
+    <child link="vgc10_tcp" />
+    <origin xyz="0 0 -0.174395921" rpy="0 0 0" />
+  </joint>
+  <ros2_control name="UF850GazeboSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="joint1">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+    <joint name="joint2">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+    <joint name="joint3">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+    <joint name="joint4">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+    <joint name="joint5">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+    <joint name="joint6">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+  </ros2_control>
+  <gazebo>
+    <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>/workspace/config/uf850_controllers.yaml</parameters>
+      <controller_manager_name>controller_manager</controller_manager_name>
+    </plugin>
+  </gazebo>
+</robot>

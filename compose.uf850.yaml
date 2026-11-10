@@ -1,0 +1,15 @@
+# Additional Compose file: never changes the working gantry startup unless selected.
+# Run: docker compose -f compose.yaml -f compose.uf850.yaml up -d
+services:
+  sim:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.uf850
+    image: conveyor-belief-vla:uf850-jazzy
+    command: ["bash", "/workspace/scripts/start_uf850_sim.sh"]
+    environment:
+      GZ_SIM_RESOURCE_PATH: /workspace/external/xarm_ws/src/xarm_ros2:/workspace/external/xarm_ws/install/xarm_description/share
+  tools:
+    image: conveyor-belief-vla:uf850-jazzy
+    environment:
+      GZ_SIM_RESOURCE_PATH: /workspace/external/xarm_ws/src/xarm_ros2:/workspace/external/xarm_ws/install/xarm_description/share

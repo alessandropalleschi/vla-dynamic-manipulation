@@ -1,0 +1,5 @@
+# Add to -f compose.yaml -f compose.uf850.yaml
+services:
+  sim:
+    environment:
+      GZ_SIM_SYSTEM_PLUGIN_PATH: /workspace/simulation/plugins/vgc10/build

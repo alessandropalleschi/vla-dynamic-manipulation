@@ -1,0 +1,298 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.9">
+  <world name="conveyor_station">
+    <physics name="default_physics" type="ignored">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <gravity>0 0 -9.81</gravity>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics" />
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands" />
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster" />
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.85 0.88 0.92 1</background>
+    </scene>
+    <light type="directional" name="sun">
+      <pose>-1 -2 5 0 0 0</pose>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <attenuation>
+        <range>100</range>
+        <constant>0.8</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>0.3 0.2 -0.9</direction>
+      <cast_shadows>true</cast_shadows>
+    </light>
+    <model name="conveyor">
+      <static>true</static>
+      <pose>0 0 0.75 0 0 0</pose>
+      <link name="belt_link">
+        <collision name="belt_collision">
+          <geometry>
+            <box>
+              <size>1.65 0.34 0.08</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>0.9</mu>
+                <mu2>50</mu2>
+                <fdir1>0 1 0</fdir1>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="belt_visual">
+          <geometry>
+            <box>
+              <size>1.65 0.34 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.05 0.12 0.45 1</ambient>
+            <diffuse>0.05 0.12 0.45 1</diffuse>
+          </material>
+        </visual>
+        <visual name="belt_frame">
+          <pose>0 0 -0.08 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.72 0.43 0.05</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.3 0.34 0.39 1</ambient>
+            <diffuse>0.3 0.34 0.39 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <plugin filename="gz-sim-track-controller-system" name="gz::sim::systems::TrackController">
+        <link>belt_link</link>
+        <velocity_topic>/conveyor/speed</velocity_topic>
+        <odometry_publish_frequency>20</odometry_publish_frequency>
+      </plugin>
+    </model>
+    <model name="pickup_table">
+      <static>true</static>
+      <pose>-0.55 -0.55 0.73 0 0 0</pose>
+      <link name="table_link">
+        <collision name="table_collision">
+          <geometry>
+            <box>
+              <size>0.38 0.36 0.12</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="table_visual">
+          <geometry>
+            <box>
+              <size>0.38 0.36 0.12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.35 0.38 0.4 1</ambient>
+            <diffuse>0.35 0.38 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="lower_box">
+      <pose>-0.52 0 0.83 0 0 0</pose>
+      <link name="box_link">
+        <inertial>
+          <mass>0.25</mass>
+          <inertia>
+            <ixx>0.00045</ixx>
+            <iyy>0.00045</iyy>
+            <izz>0.0006</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.12 0.12 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.12 0.12 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.94 0.39 0.13 1</ambient>
+            <diffuse>0.94 0.39 0.13 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+        <publish_model_pose>true</publish_model_pose>
+        <publish_link_pose>false</publish_link_pose>
+        <publish_nested_model_pose>false</publish_nested_model_pose>
+        <publish_visual_pose>false</publish_visual_pose>
+        <publish_collision_pose>false</publish_collision_pose>
+        <use_pose_vector_msg>false</use_pose_vector_msg>
+        <update_frequency>30</update_frequency>
+        <topic>/simulation/lower_box/pose</topic>
+      </plugin>
+    </model>
+    <model name="upper_box">
+      <pose>-0.55 -0.55 0.82 0 0 0</pose>
+      <link name="box_link">
+        <inertial>
+          <mass>0.10</mass>
+          <inertia>
+            <ixx>0.00012</ixx>
+            <iyy>0.00012</iyy>
+            <izz>0.00013</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.09 0.09 0.06</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.09 0.09 0.06</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.72 0.46 1</ambient>
+            <diffuse>0.16 0.72 0.46 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+        <publish_model_pose>true</publish_model_pose>
+        <publish_link_pose>false</publish_link_pose>
+        <publish_nested_model_pose>false</publish_nested_model_pose>
+        <publish_visual_pose>false</publish_visual_pose>
+        <publish_collision_pose>false</publish_collision_pose>
+        <use_pose_vector_msg>false</use_pose_vector_msg>
+        <update_frequency>30</update_frequency>
+        <topic>/simulation/upper_box/pose</topic>
+      </plugin>
+    </model>
+    <model name="external_camera">
+      <static>true</static>
+      <pose>-0.12 -0.25 2.20 0 0 0</pose>
+      <link name="camera_link">
+        <sensor name="rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>20</update_rate>
+          <topic>/station/camera/image</topic>
+          <pose>0 0 0 0 1.57079632679 0</pose>
+          <camera>
+            <horizontal_fov>1.48</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>480</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.10</near>
+              <far>8.0</far>
+            </clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+    <model name="uf850_pedestal">
+      <static>true</static>
+      <pose>-0.05 -0.47 0.39 0 0 0</pose>
+      <link name="pedestal_link">
+        <collision name="pedestal_collision">
+          <geometry>
+            <box>
+              <size>0.22 0.22 0.78</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="pedestal_visual">
+          <geometry>
+            <box>
+              <size>0.22 0.22 0.78</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.35 0.38 0.42 1</ambient>
+            <diffuse>0.35 0.38 0.42 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <plugin filename="libVgc10Vacuum.so" name="conveyor::Vgc10Vacuum">
+      <robot_model>uf850</robot_model>
+      <parent_link>link6</parent_link>
+      <object_model>upper_box</object_model>
+      <object_link>box_link</object_link>
+      <tool_offset>0 0 0.189395921</tool_offset>
+      <cup_pitch_x>0.044</cup_pitch_x>
+      <cup_pitch_y>0.044</cup_pitch_y>
+      <box_size_x>0.09</box_size_x>
+      <box_size_y>0.09</box_size_y>
+      <box_size_z>0.06</box_size_z>
+      <contact_tolerance>0.007</contact_tolerance>
+      <stable_contact_s>0.15</stable_contact_s>
+      <suction_axis>0 0 1</suction_axis>
+    </plugin>
+    <model name="uf850_debug_side_camera">
+      <static>true</static>
+      <pose>0.20 -1.75 1.60 0 0 0</pose>
+      <link name="camera_link">
+        <sensor name="side_rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>20</update_rate>
+          <topic>/debug/side_camera/image</topic>
+          <pose>0 0 0 0 0.40 1.90</pose>
+          <camera>
+            <horizontal_fov>1.50</horizontal_fov>
+            <image>
+              <width>800</width>
+              <height>600</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.10</near>
+              <far>8.0</far>
+            </clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+  
+    <!-- VLA external observation: fixed overhead RGB, looks down along -Z. -->
+    <model name="uf850_overhead_camera">
+      <static>true</static>
+      <pose>-0.35 -0.26 2.45 0 1.570796326795 0</pose>
+      <link name="camera_link">
+        <sensor name="rgb" type="camera">
+          <always_on>true</always_on>
+          <update_rate>10</update_rate>
+          <topic>/station/overhead/image</topic>
+          <gz_frame_id>uf850_overhead_camera_link</gz_frame_id>
+          <camera>
+            <camera_info_topic>/station/overhead/camera_info</camera_info_topic>
+            <horizontal_fov>1.35</horizontal_fov>
+            <image>
+              <width>640</width><height>480</height><format>R8G8B8</format>
+            </image>
+            <clip><near>0.1</near><far>6.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

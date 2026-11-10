@@ -1,0 +1,35 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.bag
+.DS_Store
+# Keep recorded bags and extracted frames out of the repository
+data/*
+!data/.gitkeep
+
+# Generated datasets and recordings
+/data/**
+!/data/uf850_hover_plan.json
+
+# Local Docker settings
+compose.user.yaml
+
+# Secrets
+.env
+.env.*
+
+# ROS / Python build artifacts
+build/
+install/
+log/
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Backups and temporary files
+*.before_*
+*.bak
+*.log
+*.mp4
+*.zip

@@ -1,0 +1,72 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.9">
+  <world name="vgc10_fixture">
+    <physics name="physics" type="ignored">
+      <max_step_size>0.002</max_step_size>
+    </physics>
+    <gravity>0 0 -9.81</gravity>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics" />
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands" />
+    <model name="table">
+      <static>true</static>
+      <pose>0 0 0.75 0 0 0</pose>
+      <link name="table_link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5 0.5 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+    <model name="uf850">
+      <static>true</static>
+      <pose>0 0 0.947 0 0 0</pose>
+      <link name="link6">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.015</radius>
+              <length>0.025</length>
+            </cylinder>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="upper_box">
+      <pose>0 0 0.82 0 0 0</pose>
+      <link name="box_link">
+        <inertial>
+          <mass>0.1</mass>
+          <inertia>
+            <ixx>0.00012</ixx>
+            <iyy>0.00012</iyy>
+            <izz>0.00012</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.09 0.09 0.06</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+    <plugin filename="libVgc10Vacuum.so" name="conveyor::Vgc10Vacuum">
+      <robot_model>uf850</robot_model>
+      <parent_link>link6</parent_link>
+      <object_model>upper_box</object_model>
+      <object_link>box_link</object_link>
+      <tool_offset>0 0 -0.097</tool_offset>
+      <cup_pitch_x>0.044</cup_pitch_x>
+      <cup_pitch_y>0.044</cup_pitch_y>
+      <box_size_x>0.09</box_size_x>
+      <box_size_y>0.09</box_size_y>
+      <box_size_z>0.06</box_size_z>
+      <contact_tolerance>0.007</contact_tolerance>
+      <stable_contact_s>0.15</stable_contact_s>
+    </plugin>
+  </world>
+</sdf>

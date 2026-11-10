@@ -1,0 +1,21 @@
+# Add to the user's existing -f compose.yaml -f compose.uf850.yaml
+#                             -f compose.uf850.vacuum.yaml
+# Dedicated plan-only MoveIt server. Does NOT change sim/tools services.
+services:
+  moveit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.uf850_moveit
+    image: conveyor-belief-vla:uf850-moveit-jazzy
+    command: ["bash", "-lc", "source /opt/ros/jazzy/setup.bash && exec /usr/bin/python3 /workspace/scripts/start_uf850_moveit.py"]
+    network_mode: host
+    ipc: host
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - sim
+    restart: "no"

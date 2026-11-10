@@ -1,0 +1,3 @@
+UF850 integration patch v3 (6 joint gz_ros2_control + 4 cup VGC10 geometry).
+Does not replace successful gantry controller/dataset scripts.
+Requires downloading official UFACTORY Jazzy robot description on user's machine.

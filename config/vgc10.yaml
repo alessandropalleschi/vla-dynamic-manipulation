@@ -1,0 +1,23 @@
+# OnRobot VGC10: user-confirmed 4 physical cups in a 2x2 grid.
+# Parameters are geometric starting values, NOT measurements of this user's hardware.
+model: "OnRobot VGC10"
+body_dimensions_m: [0.101, 0.100, 0.100]
+nominal_total_mass_kg: 0.814
+cup_count: 4
+cup_layout: "2x2"
+cup_diameter_mm: 30           # initial assumption; measure actual cups
+cup_pitch_x_mm: 50            # provisional center-to-center distances
+cup_pitch_y_mm: 50
+# The physical plate routing should be checked before controlling real channels.
+# Default: top/positive-Y row is A and bottom/negative-Y row is B.
+channel_axis: y
+channels:
+  A:
+    cup_ids: [a1, a2]
+    enabled_by_default: false
+  B:
+    cup_ids: [b1, b2]
+    enabled_by_default: false
+nominal_gripping_time_s: 0.35
+nominal_releasing_time_s: 0.20
+simulation_status: "geometry_only_no_vacuum_forces"

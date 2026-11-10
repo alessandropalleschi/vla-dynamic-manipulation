@@ -1,0 +1,12 @@
+# Dedicated CPU MoveIt planner; does not alter the working UF850/Gazebo images.
+# Build the UF850 image first as in previous milestones.
+FROM conveyor-belief-vla:uf850-jazzy
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-moveit ros-jazzy-moveit-kinematics \
+    ros-jazzy-moveit-planners-ompl python3-yaml \
+ && rm -rf /var/lib/apt/lists/*
+RUN source /opt/ros/jazzy/setup.bash && \
+    ros2 pkg prefix moveit_ros_move_group && \
+    /usr/bin/python3 -c 'from moveit_msgs.action import MoveGroup; print("MoveIt ROS interfaces OK")'
+WORKDIR /workspace

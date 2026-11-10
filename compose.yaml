@@ -1,0 +1,35 @@
+name: conveyor-belief-vla
+services:
+  sim:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: conveyor-belief-vla:jazzy
+    command: ["bash", "/workspace/scripts/start_sim.sh"]
+    network_mode: host
+    ipc: host
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: graphics,utility,compute,display
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      GZ_IP: 127.0.0.1
+      QT_QPA_PLATFORM: offscreen
+    volumes:
+      - ./:/workspace
+    restart: "no"
+  tools:
+    image: conveyor-belief-vla:jazzy
+    command: ["sleep", "infinity"]
+    network_mode: host
+    ipc: host
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      GZ_IP: 127.0.0.1
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - sim
+    restart: "no"

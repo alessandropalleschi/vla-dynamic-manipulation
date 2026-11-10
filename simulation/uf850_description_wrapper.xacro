@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- Simulation-only wrapper around UFACTORY's official UF850 device macro.
+     load_gazebo_plugin=false skips the vendor controller-YAML lookup;
+     prepare_uf850_model.py installs our own Gazebo Harmonic plugin afterward. -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="uf850">
+  <xacro:include filename="$(find xarm_description)/urdf/xarm_device_macro.xacro"/>
+  <xacro:xarm_device
+      robot_type="uf850"
+      dof="6"
+      ros2_control_plugin="gz_ros2_control/GazeboSimSystem"
+      load_gazebo_plugin="false"
+      add_gripper="false"
+      add_vacuum_gripper="false"
+      add_bio_gripper="false"/>
+</robot>

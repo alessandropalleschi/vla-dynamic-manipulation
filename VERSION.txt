@@ -1,0 +1,6 @@
+v2.1: VGC10 4-cup (2x2) geometry-only overlay
+- 4 cups / 2 vacuum channels; default 2 cups per channel.
+- Configurable assumed diameter and cup spacing (30 mm / 50x50 mm default).
+- Both UF850 URDF augmentor and existing gantry visual proxy updated.
+- No change to verified gantry joint limits, physics or overhead camera.
+- Not a working UF850 motion or physical vacuum attachment model.
