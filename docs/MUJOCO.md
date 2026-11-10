@@ -28,6 +28,23 @@ python -m vla_mujoco.vla.evaluate --expert --episodes 50 --speed-range 0.08 0.14
 ```
 (For a GL-less container: `apt-get install libegl1`; EGL then falls back to llvmpipe.)
 
+## GPU
+Simulation physics is CPU-only; the GPU helps in two places:
+
+* **Training / policy inference** — `vla-train` and `vla-eval` use CUDA automatically (`--device auto|cpu|cuda[:N]`);
+  `--amp` enables bf16 autocast on CUDA, TF32 and cuDNN autotuning are switched on. Batches are built on the CPU and
+  moved with `non_blocking` copies; for very large datasets raise `--batch`/`--seq` until the GPU is saturated.
+* **Camera rendering** — with `MUJOCO_GL=egl` and an NVIDIA container started with the `graphics` capability, MuJoCo
+  renders on the GPU instead of llvmpipe (`make gpu-check` prints the active `GL_RENDERER` and ms/frame; it warns when
+  a software rasteriser is in use). Parallel collection (`--workers N`) opens one EGL context per worker.
+
+Host requirement: NVIDIA driver + NVIDIA Container Toolkit (`docker run --gpus all ...`). The dev-container GPU
+profile passes `--gpus=all`, `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display` and `--shm-size=8g`, and
+installs the default PyPI torch wheel (CUDA build; it bundles the CUDA runtime, so only the driver is needed).
+If `make gpu-check` shows `GL_RENDERER=llvmpipe` inside the GPU container, the toolkit did not inject
+`libEGL_nvidia`; check that the `graphics` capability is enabled (`post-create.sh` also writes the EGL vendor file when
+the library exists but the file does not). Rendering is correct either way, just slower.
+
 ## Environment (`vla_mujoco/sim/env.py`)
 * **Robot**: UF850 kinematics, joint limits and (collision) meshes from UFACTORY `xarm_ros2` (BSD-3, license
   in `sim/assets/uf850/`). Arm is gravity-compensated with position actuators; masses are approximate.

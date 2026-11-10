@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--distractors", type=int, default=1)
     ap.add_argument("--dr-scale", type=float, default=1.0, help="domain-randomisation range multiplier")
     ap.add_argument("--no-dr", action="store_true", help="disable conveyor/camera/appearance randomisation")
+    ap.add_argument("--device", default="auto", help="policy device: auto | cpu | cuda")
     ap.add_argument("--json", help="write metrics here")
     a = ap.parse_args()
     runner = None
@@ -41,7 +42,8 @@ def main():
         cams = tuple(ck["args"]["cameras"])
         model = VLAPolicy(cams, arch=ck["args"]["arch"], chunk=ck["args"]["chunk"])
         model.load_state_dict(ck["model"])
-        runner = PolicyRunner(model)
+        dev = ("cuda" if torch.cuda.is_available() else "cpu") if a.device == "auto" else a.device
+        runner = PolicyRunner(model, device=dev)
     elif not a.expert:
         ap.error("pass --policy or --expert")
     results = []

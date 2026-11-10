@@ -52,7 +52,7 @@ def make_batch(eps, B, L, chunk, dev, rng):
         ch = (idx[:, None] + np.arange(chunk)[None]).clip(max=e["T"] - 1)
         tgt.append(e["action"][ch])
         tok.append(e["tok"])
-    t = lambda x: torch.from_numpy(np.asarray(x)).to(dev)  # noqa: E731
+    t = lambda x: torch.from_numpy(np.asarray(x)).to(dev, non_blocking=True)  # noqa: E731
     imgs = [t(np.stack(x)).permute(0, 1, 4, 2, 3).float().div(255) for x in imgs]
     return (
         imgs,
@@ -93,12 +93,22 @@ def main():
     ap.add_argument("--aux-w", type=float, default=0.5)
     ap.add_argument("--max-eps", type=int, default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--device", default="auto", help="auto | cpu | cuda | cuda:N")
+    ap.add_argument("--amp", action="store_true", help="bfloat16 autocast on CUDA (faster, less memory)")
     a = ap.parse_args()
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    dev = ("cuda" if torch.cuda.is_available() else "cpu") if a.device == "auto" else a.device
+    if dev.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise SystemExit("--device cuda requested but torch.cuda is not available (run `make gpu-check`)")
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    use_amp = a.amp and dev.startswith("cuda")
     eps = load_data(a.data, a.cameras, a.max_eps)
-    print(f"{len(eps)} episodes, {sum(e['T'] for e in eps)} frames, device {dev}")
+    name = torch.cuda.get_device_name(dev) if dev.startswith("cuda") else "cpu"
+    print(f"{len(eps)} episodes, {sum(e['T'] for e in eps)} frames, device {dev} ({name}), amp={use_amp}")
     model = VLAPolicy(a.cameras, arch=a.arch, chunk=a.chunk).to(dev)
     allp = np.concatenate([e["proprio"] for e in eps])
     model.p_mean.copy_(torch.from_numpy(allp.mean(0)))
@@ -115,7 +125,9 @@ def main():
     t0 = time.time()
     for step in range(1, a.steps + 1):
         imgs, pr, aux, tok, tgt = make_batch(eps, a.batch, a.seq, a.chunk, dev, rng)
-        pred, aux_p, _ = model(augment(imgs), pr + 0.0 * pr, tok)
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            pred, aux_p, _ = model(augment(imgs), pr, tok)
+        pred, aux_p = pred.float(), aux_p.float()
         l_act = F.l1_loss(pred[..., :4], tgt[..., :4])
         l_vac = F.binary_cross_entropy_with_logits(pred[..., VAC_IDX], tgt[..., VAC_IDX])
         l_aux = F.smooth_l1_loss(aux_p, (aux - aux_mu) / aux_sd)

@@ -1,9 +1,13 @@
 {
-  "name": "vla-dynamic-manipulation (MuJoCo)",
-  "build": { "dockerfile": "Dockerfile" },
+  "name": "vla-mujoco (CPU only)",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
   "containerEnv": {
     "MUJOCO_GL": "egl",
-    "PYTHONUNBUFFERED": "1"
+    "PYTHONUNBUFFERED": "1",
+    "TORCH_VARIANT": "cpu"
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
@@ -24,16 +28,23 @@
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.testing.pytestEnabled": true,
-        "python.testing.pytestArgs": ["tests"],
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true,
-          "editor.codeActionsOnSave": { "source.fixAll.ruff": "explicit", "source.organizeImports.ruff": "explicit" }
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
         },
-        "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true, "**/.ruff_cache": true }
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.pytest_cache": true,
+          "**/.ruff_cache": true
+        }
       }
     }
   }
-  // GPU training: add  "runArgs": ["--gpus=all"]  and install a CUDA torch build
-  // (see .devcontainer/post-create.sh). Simulation itself needs no GPU.
 }

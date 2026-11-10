@@ -13,8 +13,15 @@ language-specified targets, distractors, speed changes and visual occlusion.
 
 ## Quick start (MuJoCo)
 
-**VS Code:** open the folder and choose *Reopen in Container* (`.devcontainer/`). It installs Python 3.12, headless EGL,
-all dependencies and the recommended extensions, then runs the tests.
+**VS Code:** open the folder, run *Dev Containers: Reopen in Container* and pick a configuration:
+
+| Configuration | Use when | What you get |
+|---|---|---|
+| `vla-mujoco (GPU, NVIDIA)` | the host has an NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) | CUDA torch for training, MuJoCo cameras rendered by the GPU through EGL |
+| `vla-mujoco (CPU only)` | no GPU / CI-like setups | CPU torch, software rendering |
+
+Both install Python 3.12, all dependencies and the recommended extensions, then run the tests and `make gpu-check`.
+Without VS Code: `docker compose -f compose.mujoco.yaml run --rm mujoco` gives a GPU shell.
 
 **Local:**
 ```bash
@@ -24,7 +31,8 @@ export MUJOCO_GL=egl          # headless GPU/software rendering (glfw if you hav
 make test                     # simulator tests, ~3 s
 make demo                     # expert episode -> demo.gif
 make collect                  # 200 expert demos -> data/mj_demos
-make train                    # behaviour-cloning baseline -> runs/gru
+make gpu-check                # is CUDA + GPU rendering working?
+make train                    # behaviour-cloning baseline -> runs/gru (uses the GPU + bf16 automatically)
 ```
 A GL-less container needs `apt-get install libegl1` (Mesa software rendering is then used).
 

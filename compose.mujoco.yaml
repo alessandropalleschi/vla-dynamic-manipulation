@@ -1,0 +1,28 @@
+# GPU-enabled shell for the MuJoCo stack without VS Code:
+#   docker compose -f compose.mujoco.yaml run --rm mujoco
+# Requires the NVIDIA Container Toolkit on the host. Remove `deploy` to run CPU-only.
+name: vla-mujoco
+services:
+  mujoco:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    shm_size: 8gb
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics,display
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      bash -lc "pip install -q torch && pip install -q -e '.[dev]' && python -m vla_mujoco.gpu_check; exec bash"
+    stdin_open: true
+    tty: true
