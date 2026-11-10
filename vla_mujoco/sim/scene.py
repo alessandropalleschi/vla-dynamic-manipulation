@@ -34,6 +34,7 @@ TOOL_TCP_Z = 0.1894  # link6 -> cup face
 CUP_R = 0.0202
 CUP_XY = 0.022
 CUP_TOP_Z = 0.1051  # link6 z where the single-cup STL starts (body -0.0901 flipped)
+N_OBJ = 8  # size of the manipulable-object pool
 VGC10_MESH_DIR = (
     Path(__file__).resolve().parents[2]
     / "external"
@@ -165,11 +166,15 @@ def build_mjcf(img_size: int = 128) -> str:
         f'rgba="0.5 0.5 0.5 1" contype="0" conaffinity="0"/></body>'
         for i in range(6)
     )
-    box_geom = lambda half, rgba, mass: (  # noqa: E731
-        f'<geom type="box" size="{half} {half} {half}" mass="{mass}" rgba="{rgba}" '
-        f'class="obj" friction="1.0 0.01 0.001"/>'
+    objects = "\n    ".join(
+        f'<body name="obj{i}" pos="{4 + 0.4 * i} 4 -4" gravcomp="1"><freejoint name="obj{i}_free"/>'
+        f'<geom name="obj{i}" type="box" size="0.05 0.05 0.05" mass="0.2" rgba="0.5 0.5 0.5 1" class="obj" '
+        f'friction="1.0 0.01 0.001" contype="0" conaffinity="0"/></body>'
+        for i in range(N_OBJ)
     )
-
+    welds = "\n    ".join(
+        f'<weld name="grasp_obj{i}" body1="tool" body2="obj{i}" active="false"/>' for i in range(N_OBJ)
+    )
     return f"""<mujoco model="uf850_dynamic_stack">
   <compiler angle="radian" meshdir="{ASSET_DIR}" autolimits="true"/>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
@@ -218,20 +223,8 @@ def build_mjcf(img_size: int = 128) -> str:
     <body name="base" pos="0 0 0.003">
       <geom type="mesh" mesh="link_base" mass="{LINK_MASS[0]}" class="arm"/>
 {arm}    </body>
-    <!-- manipulable objects -->
-    <body name="src" pos="0.3 0.3 {SRC_HALF + 0.001}">
-      <freejoint name="src_free"/>
-      {box_geom(SRC_HALF, "0.85 0.15 0.15 1", 0.2)}
-    </body>
-    <body name="tgt" pos="{BELT_X} -0.4 {BELT_TOP + TGT_HALF + 0.001}">
-      <freejoint name="tgt_free"/>
-      {box_geom(TGT_HALF, "0.15 0.3 0.85 1", 0.5)}
-    </body>
-    <body name="dist" pos="{BELT_X} -0.7 {BELT_TOP + TGT_HALF + 0.001}">
-      <freejoint name="dist_free"/>
-      {box_geom(TGT_HALF, "0.15 0.7 0.25 1", 0.5)}
-    </body>
-    <!-- occluder panel (parked below the floor until used) -->
+    <!-- manipulable objects: a fixed pool, activated per episode (parked + gravity-compensated when unused) -->
+    {objects}
     <!-- visual-only clutter slots (mocap so they are not fused away); parked below the floor when unused -->
     {clutter}
     <body name="occluder" mocap="true" pos="0.95 0 -2">
@@ -242,9 +235,7 @@ def build_mjcf(img_size: int = 128) -> str:
     <camera name="overhead" pos="{BELT_X - 0.1} 0 1.25" xyaxes="0 -1 0 1 0 0" fovy="55"/>
   </worldbody>
   <equality>
-    <weld name="grasp_src" body1="tool" body2="src" active="false"/>
-    <weld name="grasp_tgt" body1="tool" body2="tgt" active="false"/>
-    <weld name="grasp_dist" body1="tool" body2="dist" active="false"/>
+    {welds}
   </equality>
   <actuator>
     {act}

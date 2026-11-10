@@ -31,8 +31,10 @@ from dataclasses import dataclass, field
 import mujoco
 import numpy as np
 
+from ..tasks.generator import generate
+from .entities import PALETTE  # noqa: F401  (re-exported)
 from .randomize import DomainRandomizer
-from .scene import BELT_TOP, CUP_R, CUP_XY, SRC_HALF, TGT_HALF, build_mjcf
+from .scene import BELT_TOP, CUP_R, CUP_XY, N_OBJ, build_mjcf
 
 PROPRIO_DIM = 22
 # Actions are commanded *velocities* (normalised to +-1), so a policy is independent of the control rate:
@@ -45,16 +47,6 @@ WORKSPACE_HI = np.array([0.80, 0.60, 0.60])
 GRIP_TIME_S = 0.35
 RELEASE_TIME_S = 0.20
 
-PALETTE = {
-    "red": (0.85, 0.15, 0.15),
-    "green": (0.15, 0.70, 0.25),
-    "blue": (0.15, 0.30, 0.85),
-    "yellow": (0.90, 0.80, 0.10),
-    "orange": (0.95, 0.50, 0.10),
-    "purple": (0.55, 0.20, 0.75),
-    "cyan": (0.10, 0.75, 0.80),
-    "pink": (0.95, 0.45, 0.70),
-}
 HOME_Q = np.array([0.0, 0.0, -1.2, 0.0, 1.2, 0.0])  # refined at construction by IK
 
 
@@ -67,7 +59,10 @@ class EnvConfig:
     max_time_s: float = 22.0
     belt_speed_range: tuple = (0.02, 0.07)  # m/s
     speed_change: bool = False  # surprise belt-speed change mid-episode
-    n_distractors: int = 1  # extra box on the belt (language must disambiguate)
+    task: str = "stack"  # stack | belt_to_table | belt_to_belt | tower | random
+    n_distractors: int = 1  # extra bystander objects on the belt (language must disambiguate)
+    n_table_distractors: int = 0  # extra bystander objects on the table
+    require_unmoved: bool = True  # knocking over / displacing a bystander makes the episode fail
     occlusion_s: float = 0.0  # >0: a panel hides the target from `front` for this long
     randomize_colors: bool = True
     randomize_physics: bool = True
@@ -129,11 +124,13 @@ class DynamicStackEnv:
         self.site = m.site("tcp").id
         self.belt_adr = m.joint("belt_slide").qposadr[0]
         self.belt_act = m.actuator("belt_drive").id
-        self.boxes = {n: self._box_info(n) for n in ("src", "tgt", "dist")}
+        self.boxes = {f"obj{i}": self._box_info(f"obj{i}") for i in range(N_OBJ)}
+        self.ent, self.task, self.init_pose = {}, None, {}
+        self.belt_top = BELT_TOP
+        self.belt_x, self.belt_yaw = 0.62, 0.0
         self.rand = DomainRandomizer(m)
         self.act_delay_steps = 0
         self.obs_delay_steps = 0
-        self.half = {"src": SRC_HALF, "tgt": TGT_HALF, "dist": TGT_HALF}
         self.belt_dir = np.array([0.0, 1.0])
         self.renderer = mujoco.Renderer(m, self.cfg.img_size, self.cfg.img_size) if self.cfg.render else None
         self.home_q = self._solve_home()
@@ -209,6 +206,19 @@ class DynamicStackEnv:
         _, R = self.tcp_pose()
         return math.atan2(R[1, 0], R[0, 0])
 
+    def belt_coords(self, xy):
+        """World xy -> belt frame (u across the belt, s along it)."""
+        c, sn = math.cos(self.belt_yaw), math.sin(self.belt_yaw)
+        r = np.asarray(xy, float) - np.array([self.belt_x, 0.0])
+        return float(r[0] * c + r[1] * sn), float(-r[0] * sn + r[1] * c)
+
+    def entity_pose(self, name):
+        return self.box_pose(name)
+
+    def entity_vel(self, name):
+        dadr = self.boxes[name]["dadr"]
+        return self.data.qvel[dadr : dadr + 3].copy()
+
     def box_pose(self, name):
         b = self.boxes[name]
         return self.data.xpos[b["body"]].copy(), self.data.xmat[b["body"]].reshape(3, 3).copy()
@@ -249,83 +259,39 @@ class DynamicStackEnv:
         self.belt_dir = np.array([-math.sin(self.belt_yaw), math.cos(self.belt_yaw)])
         dr.cameras(r, k, cfg.randomize_camera)
         dr.appearance(r, k, cfg.randomize_appearance)
-        names = list(PALETTE)
-        if cfg.randomize_colors:
-            src_c, tgt_c, dist_c = r.choice(len(names), 3, replace=False)
-        else:
-            src_c, tgt_c, dist_c = 0, 2, 1
-        self.src_color, self.tgt_color, self.dist_color = names[src_c], names[tgt_c], names[dist_c]
-        dims, self.shape = {}, {}
-        for n in ("src", "tgt", "dist"):
-            kind = r.choice(["cube", "cuboid", "cylinder"]) if cfg.randomize_shape else "cube"
-            big = n != "src"
-            if kind == "cube" or not cfg.randomize_shape:
-                nominal = TGT_HALF if big else SRC_HALF
-                h = nominal
-                if cfg.randomize_appearance:
-                    lo, hi = (-0.005, 0.010) if n == "tgt" else (-0.01, 0.01) if big else (-0.004, 0.006)
-                    h = float(
-                        np.clip(
-                            nominal + r.uniform(lo, hi) * k, 0.05 if big else 0.044, 0.075 if big else 0.06
-                        )
-                    )
-                dims[n], self.shape[n] = (h, h, h), "box"
-            elif kind == "cuboid":
-                fp = (0.052, 0.075) if big else (0.045, 0.060)
-                hz = (0.04, 0.07) if big else (0.035, 0.06)
-                dims[n], self.shape[n] = (r.uniform(*fp), r.uniform(*fp), r.uniform(*hz)), "box"
-            else:  # upright cylinder: R must exceed the cup circle (r=31 mm) plus margin
-                R = r.uniform(0.055, 0.072) if big else r.uniform(0.05, 0.06)
-                dims[n], self.shape[n] = (
-                    (R, R, r.uniform(0.04, 0.07) if big else r.uniform(0.035, 0.06)),
-                    "cylinder",
-                )
-        self.kind = {n: ("cube" if dims[n][0] == dims[n][1] == dims[n][2] else self.shape[n]) for n in dims}
-        self.extent = {n: (float(dims[n][0]), float(dims[n][1])) for n in dims}
-        self.half = {n: float(dims[n][2]) for n in dims}  # half HEIGHT (z) of each object
-        base_mass = {"src": r.uniform(0.15, 0.35) if cfg.randomize_physics else 0.2, "tgt": 0.5, "dist": 0.5}
-        for n, c in (("src", self.src_color), ("tgt", self.tgt_color), ("dist", self.dist_color)):
-            b = self.boxes[n]
-            rgb = dr.jitter_color(r, PALETTE[c], k) if cfg.randomize_appearance else PALETTE[c]
-            m.geom_rgba[b["geom"]] = (*rgb, 1.0)
-            dr.set_shape(b["geom"], b["body"], self.shape[n], dims[n], base_mass[n])
-        dr.textures(r, [self.boxes[n]["geom"] for n in ("src", "tgt", "dist")], k, cfg.randomize_texture)
         self.table_z = dr.table_height(r, k, cfg.randomize_table)
+        ents, self.task = generate(self, r, cfg)
+        self.ent = {e.name: e for e in ents}
+        self.instruction = self.task.instruction
+        self.init_pose = {}
+        m_obj_geoms = []
+        for i in range(N_OBJ):
+            name = f"obj{i}"
+            b = self.boxes[name]
+            if name in self.ent:
+                e = self.ent[name]
+                rgb = dr.jitter_color(r, PALETTE[e.color], k) if cfg.randomize_appearance else PALETTE[e.color]
+                m.geom_rgba[b["geom"]] = (*rgb, 1.0)
+                dr.set_shape(b["geom"], b["body"], e.shape, e.dims, e.mass)
+                # MuJoCo also caches contact filters per body (body_contype/conaffinity): set both levels
+                m.geom_contype[b["geom"]], m.geom_conaffinity[b["geom"]] = 2, 3
+                m.body_contype[b["body"]], m.body_conaffinity[b["body"]] = 2, 3
+                m.body_gravcomp[b["body"]] = 0.0
+                if cfg.randomize_physics:
+                    m.geom_friction[b["geom"], 0] = r.uniform(0.7, 1.2)
+                self._set_box(name, e.pos, e.yaw)
+                self.init_pose[name] = e.pos.copy()
+                m_obj_geoms.append(b["geom"])
+            else:  # parked: no collisions, no gravity, far away
+                m.geom_contype[b["geom"]] = m.geom_conaffinity[b["geom"]] = 0
+                m.body_contype[b["body"]] = m.body_conaffinity[b["body"]] = 0
+                m.body_gravcomp[b["body"]] = 1.0
+                self._set_box(name, (4 + 0.4 * i, 4, -4), 0.0)
+        dr.textures(r, m_obj_geoms, k, cfg.randomize_texture)
         self.n_clutter = dr.clutter(r, d, k, cfg.randomize_clutter)
         self.img_params = dr.image_params(r, k, cfg.randomize_image)
         self._img_rng = np.random.default_rng(int(r.integers(2**32)))
-        if cfg.randomize_physics:
-            m.geom_friction[self.boxes["src"]["geom"], 0] = r.uniform(0.7, 1.2)
-            m.geom_friction[self.boxes["tgt"]["geom"], 0] = r.uniform(0.7, 1.2)
-        noun = {
-            "src": {"cube": "cube", "box": "block", "cylinder": "cylinder"},
-            "tgt": {"cube": "cube", "box": "box", "cylinder": "cylinder"},
-        }
-        self.instruction = (
-            f"stack the {self.src_color} {noun['src'][self.kind['src']]} on the "
-            f"{self.tgt_color} {noun['tgt'][self.kind['tgt']]} moving on the conveyor"
-        )
-
-        # source block on the table (beside the belt), random heading. Keep it clear of the (rotated) rail.
-        self.src_yaw = float(r.uniform(-0.5, 0.5))
-        sy = r.uniform(0.18, 0.38)
-        rail_x = self.belt_to_world(-0.178, 0.0)[0] + sy * math.tan(self.belt_yaw)  # outer rail edge at y=sy
-        sx = min(r.uniform(0.24, 0.31), rail_x - max(self.extent["src"]) - 0.04)
-        self._set_box("src", (sx, sy, self.table_z + self.half["src"] + 0.0005), self.src_yaw)
-        # target + distractor on the belt, upstream; start further upstream on fast belts so the
-        # target is still reachable after the pick
-        ts = float(opts.get("target_y", r.uniform(-0.55, -0.35) - 4.0 * max(0.0, self.belt_speed - 0.05)))
-        self.tgt_yaw = float(self.belt_yaw + r.uniform(-0.15, 0.15))
-        xy = self.belt_to_world(r.uniform(-0.03, 0.03), ts)
-        self._set_box("tgt", (*xy, BELT_TOP + self.half["tgt"] + 0.0005), self.tgt_yaw)
-        if cfg.n_distractors > 0:
-            side = r.choice([-1.0, 1.0])
-            xy = self.belt_to_world(r.uniform(-0.03, 0.03), ts + side * r.uniform(0.27, 0.34))
-            self._set_box(
-                "dist", (*xy, BELT_TOP + self.half["dist"] + 0.0005), self.belt_yaw + r.uniform(-0.15, 0.15)
-            )
-        else:
-            self._set_box("dist", (0.2, -0.75, self.table_z + self.half["dist"] + 0.0005), 0.0)
+        self._released = {n: False for n in self.ent}
 
         # latency: commands take effect `act_delay_steps` later; images are `obs_delay_steps` old
         if cfg.randomize_latency:
@@ -360,7 +326,6 @@ class DynamicStackEnv:
         self.t = 0.0
         self.steps = 0
         self._stable_t = 0.0
-        self._released_once = False
         self._occ_active = False
         if cfg.occlusion_s > 0:
             self.occ_start = float(r.uniform(6.0, 9.0))
@@ -390,9 +355,7 @@ class DynamicStackEnv:
         if self.act_delay_steps > 0:  # command latency: apply the action issued `act_delay_steps` ago
             self._act_queue.append(a)
             a = self._act_queue.popleft()
-        self.ee_cmd = np.clip(
-            self.ee_cmd + np.clip(a[:3], -1, 1) * MAX_SPEED_M_S * self.dt, WORKSPACE_LO, WORKSPACE_HI
-        )
+        self.ee_cmd = np.clip(self.ee_cmd + np.clip(a[:3], -1, 1) * MAX_SPEED_M_S * self.dt, WORKSPACE_LO, WORKSPACE_HI)
         self.yaw_cmd = float(np.clip(self.yaw_cmd + np.clip(a[3], -1, 1) * MAX_YAW_RATE * self.dt, -2.0, 2.0))
         self.vac_cmd = float(a[4] > 0.5)
 
@@ -422,11 +385,11 @@ class DynamicStackEnv:
         """Return the box whose top face is sealed by the cups right now (else None)."""
         tcp, R = self.tcp_pose()
         tool_z = R[:, 2]
-        for name in ("src", "tgt", "dist"):
+        for name, e in self.ent.items():
             pos, Rb = self.box_pose(name)
             n = Rb[:, 2]
-            hz = self.half[name]
-            hx, hy = self.extent[name]
+            hz = e.hz
+            hx, hy = e.dims[0], e.dims[1]
             top = pos + n * hz
             gap = float((tcp - top) @ n)
             if not (-0.004 <= gap <= 0.008 and float(tool_z @ n) < -0.97):
@@ -437,7 +400,7 @@ class DynamicStackEnv:
                 for sy in (-1, 1):
                     c = tcp + R @ np.array([sx * CUP_XY, sy * CUP_XY, 0.0]) - top
                     u, v = Rb[:, 0] @ c, Rb[:, 1] @ c
-                    if self.shape[name] == "cylinder":
+                    if e.shape == "cylinder":
                         ok &= math.hypot(u, v) <= hx - 0.5 * CUP_R
                     else:
                         ok &= abs(u) <= hx - 0.5 * CUP_R and abs(v) <= hy - 0.5 * CUP_R
@@ -467,8 +430,8 @@ class DynamicStackEnv:
     def _detach(self):
         if self.held is not None:
             self.data.eq_active[self.boxes[self.held]["eq"]] = 0
+            self._released[self.held] = True
             self.held = None
-            self._released_once = True
 
     def _update_suction(self):
         if self.held is None:
@@ -495,47 +458,31 @@ class DynamicStackEnv:
         mid = self.model.body("occluder").mocapid[0]
         on = self.cfg.occlusion_s > 0 and self.occ_start <= self.t < self.occ_start + self.cfg.occlusion_s
         if on:
-            tgt, _ = self.box_pose("tgt")
+            tgt, _ = self.box_pose(self.task.steps[0].onto)
             self.data.mocap_pos[mid] = [1.0, tgt[1], 0.2]
         else:
             self.data.mocap_pos[mid] = [1.0, 0.0, -2.0]
         self._occ_active = on
 
     # ------------------------------------------------------------------- done
-    def stack_status(self):
-        """(supported, xy_offset): is `src` resting on top of `tgt`?"""
-        d = self.data
-        sb, tb = self.boxes["src"]["geom"], self.boxes["tgt"]["geom"]
-        touching = False
-        for i in range(d.ncon):
-            c = d.contact[i]
-            if {int(c.geom1), int(c.geom2)} == {sb, tb} and c.dist < 1e-3:
-                touching = True
-                break
-        sp, _ = self.box_pose("src")
-        tp, _ = self.box_pose("tgt")
-        off = float(np.linalg.norm(sp[:2] - tp[:2]))
-        above = sp[2] - tp[2] > 0.5 * (self.half["src"] + self.half["tgt"])
-        return bool(touching and above), off
-
     def _check_done(self):
-        supported, off = self.stack_status()
-        ok = supported and off <= self.cfg.place_tol_m and self.held is None
+        st = self.task.status(self)
+        self._task_status = st
+        ok = st["all_on"] and self.held is None and not (self.cfg.require_unmoved and st["collateral"])
         self._stable_t = self._stable_t + self.dt if ok else 0.0
         success = self._stable_t >= self.cfg.success_hold_s
-        sp, _ = self.box_pose("src")
-        tp, _ = self.box_pose("tgt")
-        failed = (
-            sp[2] < -0.05
-            or tp[2] < BELT_TOP - 0.02
-            or abs(tp[1]) > 1.1
-            or (
-                self._released_once
-                and self.held is None
-                and not supported
-                and sp[2] < self.table_z + self.half["src"] + 0.01
-            )
-        )
+        failed = bool(self.cfg.require_unmoved and st["collateral"])
+        for name in self.task.involved:
+            p, _ = self.entity_pose(name)
+            if p[2] < -0.1 or abs(self.belt_coords(p[:2])[1]) > 1.15:  # fell off / ran off the belt
+                failed = True
+        for step in self.task.steps:  # released but resting on the ground instead of the target
+            e = self.ent[step.obj]
+            p, _ = self.entity_pose(step.obj)
+            u, _ = self.belt_coords(p[:2])
+            base = self.belt_top if abs(u) < 0.15 else self.table_z
+            if self._released[step.obj] and self.held is None and not st["step_ok"][self.task.steps.index(step)]:
+                failed |= bool(p[2] - e.hz < base + 0.01)
         truncated = self.t >= self.cfg.max_time_s
         return bool(success or failed), bool(truncated and not (success or failed)), bool(success)
 
@@ -582,30 +529,48 @@ class DynamicStackEnv:
                 imgs[c] = self._sensor(self._frames[c][0])  # oldest kept frame = obs_delay_steps old
         return {"images": imgs, "proprio": self.proprio(), "instruction": self.instruction}
 
+    def _entity_state(self, name):
+        e = self.ent[name]
+        p, R = self.entity_pose(name)
+        v = self.entity_vel(name)
+        return {
+            "pos": p,
+            "vel": v[:2].copy(),
+            "yaw": float(math.atan2(R[1, 0], R[0, 0])),
+            "hz": e.hz,
+            "extent": (e.dims[0], e.dims[1]),
+            "shape": e.shape,
+            "category": e.category,
+            "color": e.color,
+            "location": e.location,
+        }
+
     def _info(self):
-        tp, _ = self.box_pose("tgt")
-        sp, _ = self.box_pose("src")
-        dp, _ = self.box_pose("dist")
-        supported, off = self.stack_status()
+        st = self.task.status(self)
+        step = self.task.current_step(self)
+        cur = self.task.steps[min(step, len(self.task.steps) - 1)]
+        ents = {n: self._entity_state(n) for n in self.ent}
         return {
             "t": self.t,
             "priv": {
-                "src_pos": sp,
-                "tgt_pos": tp,
-                "dist_pos": dp,
-                "src_yaw": self.src_yaw,
+                "entities": ents,
+                "steps": [(s.obj, s.onto) for s in self.task.steps],
+                "step": step,
+                "subgoal": self.task.steps[min(step, len(self.task.steps) - 1)].text,
+                "task_kind": self.task.kind,
+                "step_ok": st["step_ok"],
+                "collateral": st["collateral"],
+                # legacy keys: the current step's object and support
+                "src_pos": ents[cur.obj]["pos"],
+                "tgt_pos": ents[cur.onto]["pos"],
+                "tgt_vel": ents[cur.onto]["vel"],
                 "belt_vel": self.belt_dir * self.belt_velocity(),
                 "belt_dir": self.belt_dir.copy(),
-                "src_hz": self.half["src"],  # half height of the stacked object
-                "tgt_hz": self.half["tgt"],
-                "src_shape": self.kind["src"],
-                "tgt_shape": self.kind["tgt"],
                 "table_z": self.table_z,
-                "tgt_yaw": self.tgt_yaw,
                 "belt_cmd": float(self.data.ctrl[self.belt_act]),
                 "held": self.held,
-                "stack_supported": supported,
-                "stack_offset": off,
+                "stack_supported": bool(st["all_on"]),
+                "stack_offset": float(st["offsets"][-1]),
                 "occluded": self._occ_active,
                 "yaw_cmd": self.yaw_cmd,
             },

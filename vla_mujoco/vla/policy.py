@@ -14,20 +14,20 @@ backbone and ``TextEncoder`` for a language model to scale up.
 
 from __future__ import annotations
 
+import re
+import zlib
+
 import numpy as np
 import torch
 from torch import nn
 
-WORDS = (
-    "stack the block on box cube cylinder moving conveyor "
-    + " ".join(["red", "green", "blue", "yellow", "orange", "purple", "cyan", "pink"])
-).split()
-VOCAB = {w: i + 1 for i, w in enumerate(WORDS)}  # 0 = pad/unknown
+VOCAB_SIZE = 4096  # hashed word ids: any phrasing is representable (no OOV); swap for a pretrained encoder at scale
+MAX_TOKENS = 40
 ACT_DIM, VAC_IDX = 5, 4
 
 
-def tokenize(text: str, max_len: int = 12) -> torch.Tensor:
-    ids = [VOCAB.get(w, 0) for w in text.lower().split()][:max_len]
+def tokenize(text: str, max_len: int = MAX_TOKENS) -> torch.Tensor:
+    ids = [1 + zlib.crc32(w.encode()) % (VOCAB_SIZE - 1) for w in re.findall(r"[a-z]+", text.lower())][:max_len]
     return torch.tensor(ids + [0] * (max_len - len(ids)), dtype=torch.long)
 
 
@@ -53,14 +53,13 @@ class ImageEncoder(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    def __init__(self, out=64, vocab=None):
+    def __init__(self, out=64, vocab=VOCAB_SIZE):
         super().__init__()
-        vocab = vocab or len(VOCAB) + 1
         self.emb = nn.Embedding(vocab, out, padding_idx=0)
-        self.pos = nn.Parameter(torch.randn(12, out) * 0.02)
+        self.pos = nn.Parameter(torch.randn(MAX_TOKENS, out) * 0.02)
         self.proj = nn.Sequential(nn.Linear(out, out), nn.GELU())
 
-    def forward(self, tok):  # (B,12)
+    def forward(self, tok):  # (B, MAX_TOKENS)
         e = (self.emb(tok) + self.pos) * (tok > 0).unsqueeze(-1)
         return self.proj(e.sum(1) / (tok > 0).sum(1, keepdim=True).clamp(min=1))
 
@@ -75,14 +74,10 @@ class VLAPolicy(nn.Module):
         self.prop = nn.Sequential(nn.Linear(proprio_dim, 64), nn.GELU())
         feat = 128 * len(cameras) + 64 + 64
         mult = window if arch == "stack" else 1
-        self.fuse = nn.Sequential(
-            nn.Linear(feat * mult, hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU()
-        )
+        self.fuse = nn.Sequential(nn.Linear(feat * mult, hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU())
         self.gru = nn.GRU(hidden, hidden, batch_first=True) if arch == "gru" else None
         self.head = nn.Sequential(nn.Linear(hidden, hidden), nn.GELU(), nn.Linear(hidden, chunk * ACT_DIM))
-        self.aux = nn.Sequential(
-            nn.Linear(hidden, 64), nn.GELU(), nn.Linear(64, 4)
-        )  # tgt-rel-tool xyz, belt vy
+        self.aux = nn.Sequential(nn.Linear(hidden, 64), nn.GELU(), nn.Linear(64, 4))  # tgt-rel-tool xyz, belt vy
         self.register_buffer("p_mean", torch.zeros(proprio_dim))
         self.register_buffer("p_std", torch.ones(proprio_dim))
         self.hidden = hidden

@@ -1,9 +1,13 @@
 """Fast checks for the MuJoCo stack (no rendering needed). Run: pytest tests/test_mujoco_env.py"""
 
+import dataclasses
+from collections import deque
+
 import numpy as np
 
 from vla_mujoco.expert import StackExpert
 from vla_mujoco.sim.env import DynamicStackEnv, EnvConfig
+from vla_mujoco.tasks import predicates as P
 
 
 def make(seed=0, **kw):
@@ -20,6 +24,11 @@ def run_expert(env, seed):
     return info
 
 
+def belt_entity(env):
+    return next(n for n, e in env.ent.items() if e.location == "belt")
+
+
+# ------------------------------------------------------------------ kinematics / physics
 def test_ik_reaches_pose():
     env = make()
     q, ok = env.solve_ik(np.array([0.5, 0.2, 0.2]), 0.3, env.home_q)
@@ -29,14 +38,15 @@ def test_ik_reaches_pose():
     assert np.allclose(R[:, 2], [0, 0, -1], atol=1e-2)  # tool points down
 
 
-def test_belt_carries_box_at_commanded_speed():
+def test_belt_carries_objects_at_commanded_speed():
     env = make(belt_speed_range=(0.05, 0.05))
     env.reset(seed=1)
-    y0 = env.box_pose("tgt")[0][1]
+    n = belt_entity(env)
+    s0 = env.belt_coords(env.entity_pose(n)[0][:2])[1]
     for _ in range(40):
         env.step(np.zeros(5))
-    dy = env.box_pose("tgt")[0][1] - y0
-    assert abs(dy - 0.05 * 40 * env.dt) < 5e-3
+    ds = env.belt_coords(env.entity_pose(n)[0][:2])[1] - s0
+    assert abs(ds - 0.05 * 40 * env.dt) < 5e-3
 
 
 def test_noop_policy_does_not_succeed():
@@ -54,8 +64,43 @@ def test_suction_needs_seal_and_dwell():
     assert env.held is None
 
 
-def test_expert_stacks_across_seeds():
-    wins = sum(run_expert(make(seed=s), s)["success"] for s in range(8))
+def test_parked_pool_objects_are_inert():
+    env = make(seed=0, n_distractors=0)
+    env.reset(seed=0)
+    parked = [f"obj{i}" for i in range(8) if f"obj{i}" not in env.ent]
+    assert parked
+    for _ in range(20):
+        env.step(np.zeros(5))
+    for n in parked:
+        assert env.entity_pose(n)[0][2] < -3.9  # still far away, not falling
+
+
+def test_reset_is_deterministic():
+    a, b = make(), make()
+    ia, ib = a.reset(seed=11)[1], b.reset(seed=11)[1]
+    assert a.instruction == b.instruction
+    for n in ia["priv"]["entities"]:
+        assert np.allclose(ia["priv"]["entities"][n]["pos"], ib["priv"]["entities"][n]["pos"])
+
+
+# ---------------------------------------------------------------------------- tasks
+def test_expert_solves_every_task_kind():
+    seen, wins = set(), 0
+    for kind in ("stack", "belt_to_table", "belt_to_belt", "tower"):
+        for s in range(3):
+            env = make(seed=s, task=kind)
+            info = run_expert(env, s)
+            seen.add(env.task.kind)
+            wins += info["success"]
+    assert seen == {"stack", "belt_to_table", "belt_to_belt", "tower"}
+    assert wins >= 11  # of 12
+
+
+def test_expert_stacks_with_crowded_scene_and_ood_randomisation():
+    wins = sum(
+        run_expert(make(seed=s, task="random", n_distractors=3, n_table_distractors=2, dr_scale=1.5), s)["success"]
+        for s in range(8)
+    )
     assert wins >= 7
 
 
@@ -64,13 +109,52 @@ def test_expert_handles_speed_change_and_occlusion():
     assert run_expert(env, 5)["success"]
 
 
-def test_reset_is_deterministic():
-    a, b = make(), make()
-    ia, ib = a.reset(seed=11)[1], b.reset(seed=11)[1]
-    assert np.allclose(ia["priv"]["tgt_pos"], ib["priv"]["tgt_pos"])
-    assert a.instruction == b.instruction
+def test_expert_stacks_every_shape_combination():
+    combos, wins = set(), 0
+    for s in range(30):
+        env = make(seed=s)
+        info = run_expert(env, s)
+        st = env.task.steps[0]
+        combos.add((env.ent[st.obj].category, env.ent[st.onto].category))
+        wins += info["success"]
+    assert len(combos) >= 8  # many category pairs are exercised
+    assert wins >= 29
 
 
+def test_instruction_matches_task_and_subgoals():
+    env = make(task="tower")
+    env.reset(seed=1)
+    assert env.task.kind == "tower" and len(env.task.steps) == 2
+    assert "on top of it" in env.instruction
+    assert "you just placed" in env.task.steps[1].text
+
+
+def test_on_predicate_and_support_query():
+    env = make(seed=2, task="stack")
+    run_expert(env, 2)
+    st = env.task.steps[0]
+    ok, off = P.on(env, st.obj, st.onto)
+    assert ok and off < 0.012
+    tp, _ = env.entity_pose(st.onto)
+    top_of_stack = env.entity_pose(st.obj)[0][2] + env.ent[st.obj].hz
+    assert np.isclose(P.support_height(env, tp[:2]), top_of_stack, atol=2e-3)  # includes the stacked object
+    assert P.support_height(env, tp[:2], exclude=st.obj) < top_of_stack - 0.02
+
+
+def test_knocking_a_bystander_fails_the_episode():
+    env = make(seed=1, require_unmoved=True)
+    env.reset(seed=1)
+    by = next(n for n in env.ent if n not in env.task.involved)
+    env.data.qpos[env.boxes[by]["qadr"] + 3 : env.boxes[by]["qadr"] + 7] = [0.7071, 0.7071, 0, 0]  # tip it over
+    import mujoco
+
+    mujoco.mj_forward(env.model, env.data)
+    assert P.disturbed(env, by)
+    _, _, term, _, info = env.step(np.zeros(5))
+    assert term and not info["success"]
+
+
+# -------------------------------------------------------------------- randomisation
 def test_conveyor_randomisation_keeps_geometry_consistent():
     env = make(seed=4)
     yaws = set()
@@ -78,7 +162,6 @@ def test_conveyor_randomisation_keeps_geometry_consistent():
         env.reset(seed=s)
         yaws.add(round(env.belt_yaw, 3))
         m, d = env.model, env.data
-        # rails stay parallel to the belt slab (guards against stale geom_sameframe shortcuts)
         belt_y = d.geom_xmat[m.geom("belt_top").id].reshape(3, 3)[:, 1]
         for rail in ("rail_l", "rail_r", "belt_frame"):
             assert np.allclose(d.geom_xmat[m.geom(rail).id].reshape(3, 3)[:, 1], belt_y, atol=1e-6)
@@ -103,29 +186,18 @@ def test_expert_stacks_with_out_of_distribution_randomisation():
 
 
 def test_shape_change_keeps_inertia_and_bounds_consistent():
-    env = make(seed=2)
+    env = make(seed=2, task="random", n_distractors=3, n_table_distractors=1)
     m = env.model
     seen = set()
     for seed in range(12):
         env.reset(seed=seed)
-        for n in ("src", "tgt", "dist"):
+        for n, e in env.ent.items():
             b = env.boxes[n]
-            seen.add(env.kind[n])
-            assert np.isclose(m.geom_size[b["geom"]][1 if env.shape[n] == "cylinder" else 2], env.half[n])
+            seen.add(e.category)
+            assert np.isclose(m.geom_size[b["geom"]][1 if e.shape == "cylinder" else 2], e.hz)
             assert np.all(m.body_inertia[b["body"]] > 0)
-            assert m.geom_rbound[b["geom"]] >= env.half[n]
-    assert {"cube", "cylinder"} <= seen
-
-
-def test_expert_stacks_every_shape_combination():
-    combos, wins = set(), 0
-    for s in range(30):
-        env = make(seed=s)
-        info = run_expert(env, s)
-        combos.add((env.kind["src"], env.kind["tgt"]))
-        wins += info["success"]
-    assert len(combos) >= 6  # cube/cuboid/cylinder pairs are all being exercised
-    assert wins >= 29
+            assert m.geom_rbound[b["geom"]] >= e.hz
+    assert {"cube", "cylinder", "slab"} <= seen
 
 
 def test_table_height_clutter_robot_start_and_sensor_randomisation():
@@ -138,15 +210,16 @@ def test_table_height_clutter_robot_start_and_sensor_randomisation():
         clutter.add(env.n_clutter)
         params.add(round(env.img_params["noise"], 4))
         assert -0.05 <= env.table_z <= 0.0
-        # the block rests on the (lowered) table
-        assert abs(env.box_pose("src")[0][2] - (env.table_z + env.half["src"])) < 2e-3
+        for n, e in env.ent.items():
+            if e.location == "table":  # resting on the (lowered) table
+                assert abs(env.entity_pose(n)[0][2] - (env.table_z + e.hz)) < 2e-3
     assert len(tz) > 1 and len(starts) > 1 and len(clutter) > 1 and len(params) > 1
 
 
 def test_all_randomisation_can_be_disabled():
     off = make(seed=1, randomize_physics=False, **EnvConfig.dr_flags(False))
     off.reset(seed=5)
-    assert off.kind["src"] == "cube" and off.half["src"] == 0.05 and off.table_z == 0.0
+    assert all(e.category == "cube" and e.hz == 0.05 for e in off.ent.values()) and off.table_z == 0.0
     assert off.n_clutter == 0 and off.belt_yaw == 0.0
     assert off.img_params == {"noise": 0.0, "blur": 0.0, "gain": 1.0, "bias": 0.0}
     assert np.allclose(off.ee_cmd, off.home_tcp, atol=1e-3)
@@ -160,8 +233,14 @@ def test_sensor_model_changes_pixels_but_keeps_dtype():
     assert out.dtype == np.uint8 and out.shape == raw.shape and not np.array_equal(out, raw)
 
 
+def test_dr_flags_cover_every_randomisation_switch():
+    all_flags = {f.name for f in dataclasses.fields(EnvConfig) if f.name.startswith("randomize_")}
+    # colour naming and physics are semantic/physical switches, deliberately outside dr_flags
+    assert set(EnvConfig.dr_flags(True)) == all_flags - {"randomize_colors", "randomize_physics"}
+
+
+# ----------------------------------------------------------------- rate / latency
 def test_action_is_a_velocity_independent_of_control_rate():
-    """The same normalised action moves the commanded pose the same distance per *second* at any rate."""
     dist = {}
     for hz in (10, 40):
         env = make(seed=0, control_hz=hz, **EnvConfig.dr_flags(False))
@@ -170,9 +249,7 @@ def test_action_is_a_velocity_independent_of_control_rate():
         n = int(hz * 0.5)
         for _ in range(n):
             env.step(np.array([1.0, 0, 0, 0, 0]))
-        dist[hz] = (env.ee_cmd - p0)[0] / (
-            n * env.dt
-        )  # m/s (dt is rounded to a whole number of physics steps)
+        dist[hz] = (env.ee_cmd - p0)[0] / (n * env.dt)  # m/s (dt is a whole number of physics steps)
     assert np.isclose(dist[10], 0.3, rtol=1e-3) and np.isclose(dist[40], 0.3, rtol=1e-3)
 
 
@@ -183,20 +260,10 @@ def test_expert_succeeds_at_other_control_rates_and_with_latency():
     assert run_expert(env, 4)["success"]
 
 
-def test_dr_flags_cover_every_randomisation_switch():
-    import dataclasses
-
-    all_flags = {f.name for f in dataclasses.fields(EnvConfig) if f.name.startswith("randomize_")}
-    # colour naming and physics are semantic/physical switches, deliberately outside dr_flags
-    assert set(EnvConfig.dr_flags(True)) == all_flags - {"randomize_colors", "randomize_physics"}
-
-
 def test_command_latency_delays_motion_and_is_predictable():
     env = make(seed=0, **EnvConfig.dr_flags(False))
     env.reset(seed=0)
     env.act_delay_steps = 3
-    from collections import deque
-
     env._act_queue = deque([np.zeros(5)] * 3)
     p0 = env.ee_cmd.copy()
     for _ in range(3):

@@ -25,7 +25,9 @@ def main():
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
     ap.add_argument("--speed-change", action="store_true")
     ap.add_argument("--occlusion-s", type=float, default=0.0)
-    ap.add_argument("--distractors", type=int, default=1)
+    ap.add_argument("--distractors", type=int, default=1, help="bystander objects on the belt")
+    ap.add_argument("--table-distractors", type=int, default=0, help="bystander objects on the table")
+    ap.add_argument("--task", default="stack", help="stack | belt_to_table | belt_to_belt | tower | random")
     ap.add_argument("--dr-scale", type=float, default=1.0, help="domain-randomisation range multiplier")
     ap.add_argument("--no-dr", action="store_true", help="disable conveyor/camera/appearance randomisation")
     ap.add_argument("--exec-horizon", type=int, default=4, help="actions executed per policy re-plan")
@@ -58,6 +60,8 @@ def main():
             speed_change=a.speed_change,
             occlusion_s=a.occlusion_s,
             n_distractors=a.distractors,
+            n_table_distractors=a.table_distractors,
+            task=a.task,
             dr_scale=a.dr_scale,
             **EnvConfig.dr_flags(not a.no_dr),
         )
@@ -70,7 +74,7 @@ def main():
         for _ in range(int(cfg.max_time_s * cfg.control_hz)):
             act = ex.act(info) if ex else runner.act(obs)
             obs, _, term, trunc, info = env.step(act)
-            held_ever |= info["priv"]["held"] == "src"
+            held_ever |= info["priv"]["held"] in {st[0] for st in info["priv"]["steps"]}
             if term or trunc:
                 break
         P = info["priv"]
@@ -82,6 +86,9 @@ def main():
                 time=info["t"],
                 offset=P["stack_offset"],
                 speed=env.belt_speed,
+                kind=env.task.kind,
+                instruction=env.instruction,
+                steps_done=int(sum(P["step_ok"])),
             )
         )
         env.close()
@@ -90,6 +97,10 @@ def main():
         success_rate=float(np.mean([r["success"] for r in results])),
         pick_rate=float(np.mean([r["picked"] for r in results])),
         episodes=len(results),
+        by_task={
+            k: float(np.mean([r["success"] for r in results if r["kind"] == k]))
+            for k in sorted({r["kind"] for r in results})
+        },
     )
     print(m)
     if a.json:

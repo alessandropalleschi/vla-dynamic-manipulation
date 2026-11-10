@@ -32,9 +32,7 @@ def main():
         if term or trunc:
             break
     print(obs["instruction"], "| success:", info["success"], f"| t={info['t']:.1f}s")
-    frames[0].save(
-        a.out, save_all=True, append_images=frames[1:], duration=int(1000 * env.dt * a.every), loop=0
-    )
+    frames[0].save(a.out, save_all=True, append_images=frames[1:], duration=int(1000 * env.dt * a.every), loop=0)
     frames[-1].save(a.out.replace(".gif", "_last.png"))
     print("wrote", a.out)
 

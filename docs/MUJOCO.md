@@ -58,8 +58,28 @@ the library exists but the file does not). Rendering is correct either way, just
   `config/vgc10.yaml` (30 mm / 50 mm cups) disagrees with the URDF generator (40 mm / 44 mm); the generator
   values are used. Channels A/B are not modelled separately.
 * **Conveyor**: a belt slab on a velocity-driven slide joint, so boxes are carried by real friction, and can slip.
-* **Task**: pick the *source object* (cube, cuboid or cylinder) from the table, stack it on the *target box* (one of two boxes on the belt;
-  the language instruction names the colours, so the distractor requires language grounding).
+* **Entities and tasks** (`sim/entities.py`, `tasks/`, `lang/`): a pool of 8 objects is activated per episode
+  (the rest are parked, collision-free). Each object has a *category* (cube, block, cylinder, slab, disc), colour,
+  size and a location (conveyor or table). A **task** is an ordered list of steps "put A onto B" plus generated
+  language; success is computed from generic predicates (`on`, `disturbed`, `support_height`), not hardcoded:
+
+  | task kind | what happens |
+  |---|---|
+  | `stack` | pick a table object, put it on a belt object |
+  | `belt_to_table` | pick a *moving* belt object, put it on a table object |
+  | `belt_to_belt` | pick one belt object, put it on another |
+  | `tower` | two sequential placements: A onto B (belt), then C on top of A |
+
+  `EnvConfig(task="random")` mixes all kinds; `n_distractors` / `n_table_distractors` add bystander objects (they must
+  not be knocked over: `require_unmoved`). Layouts are rejected unless every object is reachable in time for the belt
+  speed and every referenced object has a unique description.
+* **Language**: instructions come from a referring-expression generator that searches for a minimal *unique*
+  description from category, colour, relative size ("the larger cylinder"), location and ordering ("the second cube
+  from the conveyor", "the leftmost disc on the table"). Colour is only used when needed, so it cannot be a shortcut;
+  the pick object is "from" a place and the support is "on" a place, followed by "onto" / "on top of". Examples:
+  "put the cylinder from the conveyor onto the cylinder on the table"; "move the red cube on top of the yellow object
+  on the conveyor. After that, put the cylinder on top of it". Every step also has a subgoal sentence (logged in the
+  demos for hierarchical training). The policy tokenizer hashes words, so any phrasing is representable.
 * **Observation**: `front` / `wrist` / `overhead` RGB, 22-D proprio (q, dq, TCP pose, commanded pose, vacuum
   cmd/held), instruction string. **Privileged** state is only in `info["priv"]`.
 * **Action**: `[vx, vy, vz, wz, vacuum]` — normalised Cartesian *velocities* (1 = 0.3 m/s / 2 rad/s) integrated into a
@@ -98,21 +118,25 @@ the library exists but the file does not). Rendering is correct either way, just
   hides the target from the `front` camera — the wrist camera still sees it), `n_distractors`.
 
 ## Expert and data
-`StackExpert` (privileged) does approach → grasp → lift → constant-velocity intercept → closed-loop track-and-descend
-→ timed release. Current measured success (this repo, `tests/` + ad-hoc sweeps over 40 seeds each):
+The expert is a generic plan executor: for each step it runs approach, grasp, lift, transfer, place, release, retreat with
+intercepts and closed-loop tracking for *moving* pick and place targets, hover height from the tallest object, the place
+height from the support query, and re-grasp on a dropped or unsealed object.
 
-| setting | expert success |
+Measured expert success (this repo; ad-hoc sweeps, seeds not cherry-picked; the learned policy is *not* evaluated here):
+
+Multi-object tasks (scripted expert, full randomisation incl. language):
+
+| setting | success |
 |---|---|
-| default belt 0.02-0.07 m/s, distractor, full domain randomisation (incl. all 9 source/target shape pairs) | 120/120 |
-| same, randomisation ranges x1.6 | 60/60 |
-| speed jump + occlusion | 40/40 (nominal scene) |
-| fast belt 0.08-0.14 m/s + speed jump + occlusion + randomisation | 59/60 |
+| all four task kinds mixed (`task="random"`), 1 belt bystander | 100/100 |
+| crowded: 3 belt + 2 table bystanders, randomisation x1.5 | 79/80 |
+| fast belt 0.07-0.12 m/s + speed jump + occlusion + 2 bystanders | 58/60 |
 
-Control rate x fixed command latency (`python -m vla_mujoco.sweep_rate`, 30 episodes each, expert success):
+Control rate x fixed command latency (`python -m vla_mujoco.sweep_rate`, 30 `stack` episodes each, expert success):
 
 | rate | 0 ms | 80 ms | 160 ms | 240 ms |
 |---|---|---|---|---|
-| 10 Hz | 30/30 | 30/30 | 29/30 | 29/30 |
+| 10 Hz | 30/30 | 30/30 | 30/30 | 30/30 |
 | 20 Hz | 30/30 | 30/30 | 30/30 | 30/30 |
 | 50 Hz | 30/30 | 30/30 | 30/30 | 30/30 |
 

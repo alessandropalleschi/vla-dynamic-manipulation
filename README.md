@@ -41,7 +41,10 @@ A GL-less container needs `apt-get install libegl1` (Mesa software rendering is 
 ```
 vla_mujoco/
   sim/      scene.py (MJCF generator), env.py (Gymnasium-style DynamicStackEnv), assets/ (UF850 meshes)
-  expert.py privileged scripted expert: grasp -> intercept -> track & descend -> timed release
+  entities.py, randomize.py   (inside sim/)
+  tasks/    goal predicates, task steps, scene/task generator
+  lang/     referring-expression and instruction generation
+  expert.py generic privileged expert: pick/place any object (static or moving), multi-step plans
   data/     collect.py   parallel demo collection (images, proprio, actions, privileged labels)
   vla/      policy.py (CNN + text + proprio -> action chunks; mlp | stack | gru memory ablation),
             train.py, evaluate.py
@@ -50,6 +53,10 @@ tests/      simulator + expert tests (no GPU, no rendering)
 docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), legacy/ (Gazebo-era notes)
 ```
 
+* **Tasks** — four task kinds (`stack`, `belt_to_table`, `belt_to_belt`, 2-step `tower`) over a pool of objects
+  (cube, block, cylinder, slab, disc) on both the table and the moving belt, with bystanders that must not be disturbed.
+  Instructions are generated from the scene (category, colour, size, location, order on the belt), e.g.
+  *"put the cylinder from the conveyor onto the cylinder on the table"*.
 * **Observations** — `front` / `wrist` / `overhead` RGB, 22-D proprioception, language instruction. Privileged state is
   confined to `info["priv"]`, so deployed policies never see it.
 * **Actions** — normalised Cartesian velocities `[vx, vy, vz, wz, vacuum]` resolved by IK, independent of the control
@@ -59,8 +66,8 @@ docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), lega
   noise/blur are resampled every episode (`--dr-scale`, `--no-dr`); see `docs/MUJOCO.md` for the full table.
 * **Hard modes** — belt speed range, surprise speed jumps, an occluder panel hiding the target from the front camera,
   distractor boxes (the instruction names colours, so language must be grounded).
-* **Expert** — stacks 120/120 randomised episodes across all shape pairs (60/60 at 1.6× the randomisation range); 59/60 in the hardest
-  combination of fast belt (0.08–0.14 m/s), speed jump and occlusion.
+* **Expert** — solves 100/100 mixed multi-object tasks with full randomisation, 79/80 in crowded scenes at 1.5× randomisation, and 58/60
+  with fast belts, speed jumps and occlusion (see `docs/MUJOCO.md`).
 * **Console scripts** after install: `vla-demo`, `vla-collect`, `vla-train`, `vla-eval`.
 
 Read [`docs/MUJOCO.md`](docs/MUJOCO.md) for the gripper model, success definition, limitations and next steps.

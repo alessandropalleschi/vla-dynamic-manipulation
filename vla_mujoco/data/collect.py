@@ -28,7 +28,7 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
     env = DynamicStackEnv(cfg)
     obs, info = env.reset(seed=seed)
     ex = StackExpert(env, seed=seed, noise=noise)
-    rec = {k: [] for k in ["proprio", "action", "tgt_pos", "tgt_vel_y", "src_pos", "occluded", "phase"]}
+    rec = {k: [] for k in ["proprio", "action", "tgt_pos", "tgt_vel_y", "src_pos", "occluded", "phase", "step"]}
     imgs = {c: [] for c in cfg.cameras}
     success = False
     for _ in range(int(cfg.max_time_s * cfg.control_hz)):
@@ -39,10 +39,11 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
         rec["proprio"].append(obs["proprio"])
         rec["action"].append(a)
         rec["tgt_pos"].append(P["tgt_pos"])
-        rec["tgt_vel_y"].append(P["belt_vel"][1])
+        rec["tgt_vel_y"].append(P["tgt_vel"][1])
         rec["src_pos"].append(P["src_pos"])
         rec["occluded"].append(P["occluded"])
         rec["phase"].append(PHASES.index(ex.phase))
+        rec["step"].append(P["step"])
         obs, _, term, trunc, info = env.step(a)
         success = info["success"]
         if term or trunc:
@@ -51,6 +52,8 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
     out = {k: np.asarray(v) for k, v in rec.items()}
     out.update({f"img_{c}": np.asarray(v, dtype=np.uint8) for c, v in imgs.items()})
     out["instruction"] = np.array(obs["instruction"])
+    out["subgoals"] = np.array([st.text for st in env.task.steps])
+    out["task_kind"] = np.array(env.task.kind)
     return seed, success, out
 
 
@@ -69,7 +72,9 @@ def main():
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
     ap.add_argument("--speed-change", action="store_true")
     ap.add_argument("--occlusion-s", type=float, default=0.0)
-    ap.add_argument("--distractors", type=int, default=1)
+    ap.add_argument("--distractors", type=int, default=1, help="bystander objects on the belt")
+    ap.add_argument("--table-distractors", type=int, default=0, help="bystander objects on the table")
+    ap.add_argument("--task", default="stack", help="stack | belt_to_table | belt_to_belt | tower | random")
     ap.add_argument("--dr-scale", type=float, default=1.0, help="domain-randomisation range multiplier")
     ap.add_argument("--no-dr", action="store_true", help="disable conveyor/camera/appearance randomisation")
     a = ap.parse_args()
@@ -79,6 +84,8 @@ def main():
         speed_change=a.speed_change,
         occlusion_s=a.occlusion_s,
         n_distractors=a.distractors,
+        n_table_distractors=a.table_distractors,
+        task=a.task,
         dr_scale=a.dr_scale,
         **EnvConfig.dr_flags(not a.no_dr),
     )

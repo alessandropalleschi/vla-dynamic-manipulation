@@ -39,9 +39,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--episodes", type=int, default=30)
     ap.add_argument("--rates", type=float, nargs="+", default=[10, 20, 50])
-    ap.add_argument(
-        "--latency-scales", type=float, nargs="+", default=[0, 1, 2], help="x 80 ms command latency"
-    )
+    ap.add_argument("--latency-scales", type=float, nargs="+", default=[0, 1, 2], help="x 80 ms command latency")
     ap.add_argument("--seed0", type=int, default=20_000)
     a = ap.parse_args()
     print("hz   cmd_latency_ms  success")

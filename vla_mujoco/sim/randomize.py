@@ -137,9 +137,7 @@ class DomainRandomizer:
             return
         m.geom_rgba[self.geom["table"], :3] = _hsv(rng, s=(0.05, 0.55), v=(0.4, 0.9))
         m.mat_rgba[self.mat_floor, :3] = _hsv(rng, s=(0.0, 0.25), v=(0.55, 1.0))
-        m.mat_rgba[self.mat_belt, :3] = np.clip(
-            rng.uniform(0.6, 1.5, 3) * 0.5 + 0.5 * rng.uniform(0.7, 1.3), 0.3, 1.5
-        )
+        m.mat_rgba[self.mat_belt, :3] = np.clip(rng.uniform(0.6, 1.5, 3) * 0.5 + 0.5 * rng.uniform(0.7, 1.3), 0.3, 1.5)
         rail = _hsv(rng, s=(0.4, 1.0), v=(0.5, 1.0))
         m.geom_rgba[self.geom["rail_l"], :3] = rail
         m.geom_rgba[self.geom["rail_r"], :3] = rail

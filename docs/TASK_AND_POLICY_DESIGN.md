@@ -1,6 +1,8 @@
 # Task and policy design: multi-object, multi-step tasks under partial observability
 
-Status: **design decisions, not yet implemented.** The current code has the single stack task (`vla_mujoco/`).
+Status: **build step 1 is implemented** (entity pool, generic pick/place expert, predicate checker, referring-expression
+language, four task kinds incl. a 2-step tower); steps 2-3 (per-cup suction, bacon strip, belief + flow-matching policy)
+are still design only.
 Target tasks: stack on a moving item; *sandwich* (take a slice, place it on the half on the conveyor);
 *bacon sandwich* (bacon strip onto the bottom slice, then close with the top slice).
 
@@ -77,7 +79,7 @@ category combinations; latency. Ablations: no memory vs frame window vs GRU vs R
 aux heads; with/without observation dropout.
 
 ## 3. Build order
-1. Entity pool, belt spawner, predicate checker, generic `Pick`/`Place` with support query, referring-expression
+1. **(done)** Entity pool, belt spawner, predicate checker, generic `Pick`/`Place` with support query, referring-expression
    generator (current stacking task kept as a special case).
 2. Per-cup suction with leakage, articulated bacon, thin bread slabs; sandwich and bacon-sandwich tasks; subgoal logging.
 3. Belief + flow-matching policy (pretrained encoders), then DAgger and the evaluation suite above.

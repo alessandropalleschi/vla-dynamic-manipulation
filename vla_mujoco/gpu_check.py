@@ -21,9 +21,7 @@ def check_cuda() -> bool:
         return False
     print(f"[cuda]   torch {torch.__version__}  built for CUDA {torch.version.cuda}")
     if not torch.cuda.is_available():
-        print(
-            "[cuda]   NOT available. In a container: start it with --gpus=all and install a CUDA torch wheel."
-        )
+        print("[cuda]   NOT available. In a container: start it with --gpus=all and install a CUDA torch wheel.")
         return False
     for i in range(torch.cuda.device_count()):
         p = torch.cuda.get_device_properties(i)
@@ -68,9 +66,7 @@ def check_render() -> None:
         r.render()
     ms = (time.time() - t) / 50 * 1000
     soft = any(k in renderer.lower() for k in ("llvmpipe", "softpipe", "swrast"))
-    print(
-        f"[render] MUJOCO_GL={os.environ['MUJOCO_GL']}  GL_RENDERER={renderer}  {ms:.1f} ms/frame (128x128)"
-    )
+    print(f"[render] MUJOCO_GL={os.environ['MUJOCO_GL']}  GL_RENDERER={renderer}  {ms:.1f} ms/frame (128x128)")
     if soft:
         print(
             "[render] WARNING: software rasteriser. For GPU rendering use an NVIDIA container with "
