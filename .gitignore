@@ -37,3 +37,7 @@ __pycache__/
 # Gazebo plugin build artifacts
 /simulation/plugins/**/build/
 /simulation/plugins/**/build.*/
+
+# MuJoCo stack outputs
+runs/
+*.gif

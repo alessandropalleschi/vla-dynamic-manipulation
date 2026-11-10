@@ -8,6 +8,21 @@ The environment features a UF850 robotic arm equipped with an OnRobot VGC10 vacu
 
 The project provides a scripted manipulation policy and an RGB demonstration-recording pipeline as a foundation for learning-based control.
 
+## MuJoCo simulation (recommended)
+
+A faster, deterministic, ROS-free simulator lives in [`vla_mujoco/`](vla_mujoco/) with a dynamic-stacking
+environment, a scripted expert, demo collection, and a trainable VLA baseline. See
+[`docs/MUJOCO.md`](docs/MUJOCO.md).
+
+```bash
+pip install -r requirements-mujoco.txt && export MUJOCO_GL=egl
+python -m vla_mujoco.render_demo --seed 3 --out demo.gif
+python -m vla_mujoco.collect --out data/mj_demos --episodes 200
+python -m vla_mujoco.train --data data/mj_demos --arch gru --steps 20000
+```
+
+The Gazebo/ROS 2 pipeline below remains as the legacy stack.
+
 ## Tech Stack
 
 - **ROS 2 Jazzy** — Robot control and communication
