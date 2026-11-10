@@ -52,7 +52,8 @@ docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), lega
 
 * **Observations** — `front` / `wrist` / `overhead` RGB, 22-D proprioception, language instruction. Privileged state is
   confined to `info["priv"]`, so deployed policies never see it.
-* **Actions** — bounded Cartesian deltas `[dx, dy, dz, dyaw, vacuum]` resolved by IK.
+* **Actions** — normalised Cartesian velocities `[vx, vy, vz, wz, vacuum]` resolved by IK, independent of the control
+  rate; command/camera latency is randomised; policies replan action chunks every few steps (`--exec-horizon`).
 * **Domain randomisation** — conveyor position/yaw, camera poses, **stacked/target object shapes** (cube, cuboid,
   cylinder), textures, colours, lighting, background clutter, table height, robot start pose and camera sensor
   noise/blur are resampled every episode (`--dr-scale`, `--no-dr`); see `docs/MUJOCO.md` for the full table.

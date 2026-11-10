@@ -158,3 +158,50 @@ def test_sensor_model_changes_pixels_but_keeps_dtype():
     raw = env.render("front")
     out = env._sensor(raw)
     assert out.dtype == np.uint8 and out.shape == raw.shape and not np.array_equal(out, raw)
+
+
+def test_action_is_a_velocity_independent_of_control_rate():
+    """The same normalised action moves the commanded pose the same distance per *second* at any rate."""
+    dist = {}
+    for hz in (10, 40):
+        env = make(seed=0, control_hz=hz, **EnvConfig.dr_flags(False))
+        env.reset(seed=0)
+        p0 = env.ee_cmd.copy()
+        n = int(hz * 0.5)
+        for _ in range(n):
+            env.step(np.array([1.0, 0, 0, 0, 0]))
+        dist[hz] = (env.ee_cmd - p0)[0] / (
+            n * env.dt
+        )  # m/s (dt is rounded to a whole number of physics steps)
+    assert np.isclose(dist[10], 0.3, rtol=1e-3) and np.isclose(dist[40], 0.3, rtol=1e-3)
+
+
+def test_expert_succeeds_at_other_control_rates_and_with_latency():
+    for hz in (10, 40):
+        assert run_expert(make(seed=3, control_hz=hz), 3)["success"]
+    env = make(seed=4, randomize_latency=True, dr_scale=2.0)
+    assert run_expert(env, 4)["success"]
+
+
+def test_dr_flags_cover_every_randomisation_switch():
+    import dataclasses
+
+    all_flags = {f.name for f in dataclasses.fields(EnvConfig) if f.name.startswith("randomize_")}
+    # colour naming and physics are semantic/physical switches, deliberately outside dr_flags
+    assert set(EnvConfig.dr_flags(True)) == all_flags - {"randomize_colors", "randomize_physics"}
+
+
+def test_command_latency_delays_motion_and_is_predictable():
+    env = make(seed=0, **EnvConfig.dr_flags(False))
+    env.reset(seed=0)
+    env.act_delay_steps = 3
+    from collections import deque
+
+    env._act_queue = deque([np.zeros(5)] * 3)
+    p0 = env.ee_cmd.copy()
+    for _ in range(3):
+        env.step(np.array([1.0, 0, 0, 0, 0]))
+        assert np.allclose(env.ee_cmd, p0)  # nothing applied yet
+    assert env.ee_cmd_future[0] > p0[0] + 1e-4  # ...but three actions are in flight
+    env.step(np.array([0.0, 0, 0, 0, 0]))
+    assert env.ee_cmd[0] > p0[0]

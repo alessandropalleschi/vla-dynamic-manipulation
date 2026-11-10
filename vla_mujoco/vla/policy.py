@@ -110,15 +110,24 @@ class VLAPolicy(nn.Module):
 
 
 class PolicyRunner:
-    """Closed-loop wrapper: keeps recurrent state / frame history, returns one 5-D action."""
+    """Closed-loop wrapper returning one 5-D action per control step.
 
-    def __init__(self, policy: VLAPolicy, device="cpu", exec_horizon=1):
+    The belief/feature path (encoders + recurrent state) runs every control step, so the hidden state sees
+    every observation. A new action chunk is taken from the action head only every ``exec_horizon`` steps
+    and its first ``exec_horizon`` actions run open-loop (action chunking). With a flow-matching head that
+    is where multi-step sampling happens: ``control_hz / exec_horizon`` inferences per second.
+    """
+
+    def __init__(self, policy: VLAPolicy, device="cpu", exec_horizon=4):
         self.p, self.dev = policy.eval().to(device), device
+        self.exec_horizon = max(1, min(int(exec_horizon), policy.chunk))
         self.reset()
 
     def reset(self):
         self.h, self.hist = None, []
         self.tok = None
+        self.queue = []
+        self.replans = 0
 
     @torch.no_grad()
     def act(self, obs) -> np.ndarray:
@@ -136,11 +145,12 @@ class PolicyRunner:
             imgs = [torch.cat([h[0][i] for h in hs], 1) for i in range(len(self.p.cameras))]
             pr = torch.cat([h[1] for h in hs], 1)
             out, _, _ = self.p(imgs, pr, self.tok)
-            a = out[0, -1, 0]
         else:
             out, _, self.h = self.p(imgs, pr, self.tok, self.h)
-            a = out[0, -1, 0]
-        a = a.cpu().numpy().copy()
-        a[:4] = np.clip(a[:4], -1, 1)
-        a[4] = 1.0 / (1.0 + np.exp(-a[4]))
-        return a.astype(np.float32)
+        if not self.queue:  # re-plan: take the next `exec_horizon` actions of the predicted chunk
+            chunk = out[0, -1, : self.exec_horizon].float().cpu().numpy().copy()
+            chunk[:, :4] = np.clip(chunk[:, :4], -1, 1)
+            chunk[:, 4] = 1.0 / (1.0 + np.exp(-chunk[:, 4]))
+            self.queue = list(chunk.astype(np.float32))
+            self.replans += 1
+        return self.queue.pop(0)

@@ -14,8 +14,9 @@ Observation (what a deployed VLA may use; no privileged state)::
 
 Action (float32, 5-D, normalised to [-1, 1] except the last)::
 
-    [dx, dy, dz, dyaw, vacuum]   Cartesian end-effector deltas per control step
-    (base frame) + vacuum command in [0, 1] (> 0.5 = on).
+    [vx, vy, vz, wz, vacuum]   normalised Cartesian end-effector velocities (base frame,
+    +-1 = MAX_SPEED_M_S / MAX_YAW_RATE) + vacuum command in [0, 1] (> 0.5 = on).
+    The commanded pose advances by ``a * max_speed * dt``, so a policy does not depend on ``control_hz``.
 
 ``info["priv"]`` carries privileged ground truth (box poses, belt velocity,
 contact flags) for the expert, auxiliary losses and evaluation only.
@@ -24,6 +25,7 @@ contact flags) for the expert, auxiliary losses and evaluation only.
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 
 import mujoco
@@ -33,8 +35,10 @@ from .randomize import DomainRandomizer
 from .scene import BELT_TOP, CUP_R, CUP_XY, SRC_HALF, TGT_HALF, build_mjcf
 
 PROPRIO_DIM = 22
-MAX_STEP_M = 0.015  # per control step at action = 1  (0.3 m/s at 20 Hz)
-MAX_STEP_YAW = 0.10
+# Actions are commanded *velocities* (normalised to +-1), so a policy is independent of the control rate:
+# the commanded pose advances by  a * MAX_SPEED * dt  each control step.
+MAX_SPEED_M_S = 0.30  # translation speed at |action| = 1
+MAX_YAW_RATE = 2.0  # rad/s at |action| = 1
 WORKSPACE_LO = np.array([0.15, -0.60, -0.02])  # TCP bounds (m)
 WORKSPACE_HI = np.array([0.80, 0.60, 0.60])
 # VGC10 timing (config/vgc10.yaml): vacuum build-up / release delays
@@ -76,6 +80,7 @@ class EnvConfig:
     randomize_table: bool = True  # pick-up surface height
     randomize_robot_start: bool = True  # initial TCP pose around home
     randomize_image: bool = True  # sensor noise / blur / exposure on camera images
+    randomize_latency: bool = True  # command latency (0-80 ms) and camera latency (0-100 ms)
     dr_scale: float = 1.0  # multiplies all randomisation ranges (>1 for out-of-distribution tests)
     render: bool = True
     success_hold_s: float = 0.5
@@ -95,6 +100,7 @@ class EnvConfig:
             "table",
             "robot_start",
             "image",
+            "latency",
         )
         return {f"randomize_{k}": on for k in keys}
 
@@ -125,6 +131,8 @@ class DynamicStackEnv:
         self.belt_act = m.actuator("belt_drive").id
         self.boxes = {n: self._box_info(n) for n in ("src", "tgt", "dist")}
         self.rand = DomainRandomizer(m)
+        self.act_delay_steps = 0
+        self.obs_delay_steps = 0
         self.half = {"src": SRC_HALF, "tgt": TGT_HALF, "dist": TGT_HALF}
         self.belt_dir = np.array([0.0, 1.0])
         self.renderer = mujoco.Renderer(m, self.cfg.img_size, self.cfg.img_size) if self.cfg.render else None
@@ -182,6 +190,17 @@ class DynamicStackEnv:
         return q, err < 2e-3
 
     # ------------------------------------------------------------------ state
+    @property
+    def ee_cmd_future(self):
+        """Commanded TCP position once all in-flight (delayed) actions have been applied."""
+        pending = [np.clip(q[:3], -1, 1) for q in self._act_queue] if self.act_delay_steps else []
+        return self.ee_cmd + (np.sum(pending, axis=0) if pending else 0.0) * MAX_SPEED_M_S * self.dt
+
+    @property
+    def yaw_cmd_future(self):
+        pending = [np.clip(q[3], -1, 1) for q in self._act_queue] if self.act_delay_steps else []
+        return self.yaw_cmd + float(np.sum(pending)) * MAX_YAW_RATE * self.dt
+
     def tcp_pose(self):
         d = self.data
         return d.site_xpos[self.site].copy(), d.site_xmat[self.site].reshape(3, 3).copy()
@@ -308,6 +327,17 @@ class DynamicStackEnv:
         else:
             self._set_box("dist", (0.2, -0.75, self.table_z + self.half["dist"] + 0.0005), 0.0)
 
+        # latency: commands take effect `act_delay_steps` later; images are `obs_delay_steps` old
+        if cfg.randomize_latency:
+            self.act_delay_s = float(r.uniform(0.0, 0.08) * k)
+            self.obs_delay_s = float(r.uniform(0.0, 0.10) * k)
+        else:
+            self.act_delay_s = self.obs_delay_s = 0.0
+        self.act_delay_steps = int(round(self.act_delay_s / self.dt))
+        self.obs_delay_steps = int(round(self.obs_delay_s / self.dt))
+        self._act_queue = deque([np.zeros(5)] * self.act_delay_steps)
+        self._frames = {c: deque(maxlen=self.obs_delay_steps + 1) for c in cfg.cameras}
+
         # robot start pose: home, or a random TCP pose around it
         q0, yaw0 = self.home_q, 0.0
         if cfg.randomize_robot_start:
@@ -355,10 +385,15 @@ class DynamicStackEnv:
     # ------------------------------------------------------------------- step
     def step(self, action):
         a = np.asarray(action, dtype=np.float64).reshape(-1)
-        assert a.shape[0] == 5, "action must be [dx, dy, dz, dyaw, vacuum]"
+        assert a.shape[0] == 5, "action must be [vx, vy, vz, wz, vacuum] (normalised velocities)"
         m, d = self.model, self.data
-        self.ee_cmd = np.clip(self.ee_cmd + np.clip(a[:3], -1, 1) * MAX_STEP_M, WORKSPACE_LO, WORKSPACE_HI)
-        self.yaw_cmd = float(np.clip(self.yaw_cmd + np.clip(a[3], -1, 1) * MAX_STEP_YAW, -2.0, 2.0))
+        if self.act_delay_steps > 0:  # command latency: apply the action issued `act_delay_steps` ago
+            self._act_queue.append(a)
+            a = self._act_queue.popleft()
+        self.ee_cmd = np.clip(
+            self.ee_cmd + np.clip(a[:3], -1, 1) * MAX_SPEED_M_S * self.dt, WORKSPACE_LO, WORKSPACE_HI
+        )
+        self.yaw_cmd = float(np.clip(self.yaw_cmd + np.clip(a[3], -1, 1) * MAX_YAW_RATE * self.dt, -2.0, 2.0))
         self.vac_cmd = float(a[4] > 0.5)
 
         q_cur = d.qpos[self.arm_qadr].copy()
@@ -540,7 +575,11 @@ class DynamicStackEnv:
         return (np.clip(x, 0, 1) * 255.0 + 0.5).astype(np.uint8)
 
     def _obs(self):
-        imgs = {c: self._sensor(self.render(c)) for c in self.cfg.cameras} if self.renderer else {}
+        imgs = {}
+        if self.renderer:
+            for c in self.cfg.cameras:
+                self._frames[c].append(self.render(c))
+                imgs[c] = self._sensor(self._frames[c][0])  # oldest kept frame = obs_delay_steps old
         return {"images": imgs, "proprio": self.proprio(), "instruction": self.instruction}
 
     def _info(self):

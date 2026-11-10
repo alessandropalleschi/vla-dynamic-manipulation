@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .sim.env import MAX_STEP_M, MAX_STEP_YAW, RELEASE_TIME_S, DynamicStackEnv
+from .sim.env import MAX_SPEED_M_S, MAX_YAW_RATE, RELEASE_TIME_S, DynamicStackEnv
 
 HOVER_Z = 0.36
 PLACE_GAP = 0.004  # block bottom above target top at release (m)
@@ -42,16 +42,16 @@ class StackExpert:
     def _move(self, goal, speed, yaw_goal=None, yaw_speed=1.2):
         """Action that moves the commanded pose toward ``goal`` at <= ``speed`` m/s."""
         env = self.env
-        delta = goal - env.ee_cmd
+        delta = goal - env.ee_cmd_future  # plan from the pose after in-flight (delayed) actions land
         step = speed * env.dt
         n = np.linalg.norm(delta)
         if n > step:
             delta = delta * step / n
-        a = delta / MAX_STEP_M
+        a = delta / (MAX_SPEED_M_S * env.dt)
         dyaw = 0.0
         if yaw_goal is not None:
-            e = (yaw_goal - env.yaw_cmd + np.pi) % (2 * np.pi) - np.pi
-            dyaw = np.clip(e, -yaw_speed * env.dt, yaw_speed * env.dt) / MAX_STEP_YAW
+            e = (yaw_goal - env.yaw_cmd_future + np.pi) % (2 * np.pi) - np.pi
+            dyaw = np.clip(e, -yaw_speed * env.dt, yaw_speed * env.dt) / (MAX_YAW_RATE * env.dt)
         return a, dyaw
 
     def _enter(self, phase):
@@ -73,12 +73,12 @@ class StackExpert:
         if self.phase == "approach":
             goal = tcp_to_src_top + [0, 0, 0.10]
             a, dyaw = self._move(goal, 0.30, yaw_src)
-            if np.linalg.norm(goal - env.ee_cmd) < 3e-3 and abs(yaw_src - env.yaw_cmd) < 0.02:
+            if np.linalg.norm(goal - env.ee_cmd_future) < 3e-3 and abs(yaw_src - env.yaw_cmd_future) < 0.02:
                 self._enter("descend")
         elif self.phase == "descend":
             goal = tcp_to_src_top + [0, 0, 0.0005]
             a, dyaw = self._move(goal, 0.10, yaw_src)
-            gap = env.ee_cmd[2] - tcp_to_src_top[2]
+            gap = env.ee_cmd_future[2] - tcp_to_src_top[2]
             vac = 1.0 if gap < 0.012 else 0.0
             if gap < 0.002:
                 vac = 1.0
@@ -86,9 +86,9 @@ class StackExpert:
                     self._enter("lift")
         elif self.phase == "lift":
             vac = 1.0
-            goal = np.array([env.ee_cmd[0], env.ee_cmd[1], HOVER_Z])
+            goal = np.array([env.ee_cmd_future[0], env.ee_cmd_future[1], HOVER_Z])
             a, dyaw = self._move(goal, 0.35, yaw_tgt)
-            if abs(env.ee_cmd[2] - HOVER_Z) < 3e-3:
+            if abs(env.ee_cmd_future[2] - HOVER_Z) < 3e-3:
                 self._enter("transfer")
         elif self.phase == "transfer":
             vac = 1.0
@@ -97,40 +97,40 @@ class StackExpert:
             t_arr = 0.0
             for _ in range(6):
                 goal = np.array([tgt[0] + v[0] * t_arr, tgt[1] + v[1] * t_arr, HOVER_Z])
-                t_arr = np.linalg.norm(goal - env.ee_cmd) / 0.35
+                t_arr = np.linalg.norm(goal - env.ee_cmd_future) / 0.35
             goal[2] = HOVER_Z
             a, dyaw = self._move(goal, 0.35, yaw_tgt)
-            if np.linalg.norm((env.ee_cmd - goal)[:2]) < 6e-3:
+            if np.linalg.norm((env.ee_cmd_future - goal)[:2]) < 6e-3:
                 self._enter("track")
             _ = top
         elif self.phase == "track":
             vac = 1.0
             place_z = tgt[2] + tgt_h + held_h + PLACE_GAP
             # closed-loop xy tracking with belt feed-forward; descend only when aligned
-            lookahead = 2.0 * env.dt
+            lookahead = 2.0 * env.dt + env.act_delay_s  # commands land act_delay_s later; belt keeps moving
             xy_goal = tgt[:2] + v[:2] * lookahead
-            err_xy = np.linalg.norm(xy_goal - env.ee_cmd[:2])
+            err_xy = np.linalg.norm(xy_goal - env.ee_cmd_future[:2])
             descend_ok = err_xy < 0.010
             vz = -0.10 if descend_ok else 0.0
-            dz = max(place_z - env.ee_cmd[2], vz * env.dt)
-            if env.ee_cmd[2] <= place_z + 1e-4:
-                dz = place_z - env.ee_cmd[2]
-            goal = np.array([xy_goal[0], xy_goal[1], env.ee_cmd[2] + dz])
+            dz = max(place_z - env.ee_cmd_future[2], vz * env.dt)
+            if env.ee_cmd_future[2] <= place_z + 1e-4:
+                dz = place_z - env.ee_cmd_future[2]
+            goal = np.array([xy_goal[0], xy_goal[1], env.ee_cmd_future[2] + dz])
             a, dyaw = self._move(goal, 0.6, yaw_tgt)
-            gap = env.ee_cmd[2] - place_z
+            gap = env.ee_cmd_future[2] - place_z
             # command release RELEASE_TIME_S early so the block lets go right at place_z
             if descend_ok and gap < abs(vz) * RELEASE_TIME_S + 0.002:
                 self._enter("release")
         elif self.phase == "release":
             place_z = tgt[2] + tgt_h + held_h + PLACE_GAP
-            xy_goal = tgt[:2] + v[:2] * 2.0 * env.dt
-            goal = np.array([xy_goal[0], xy_goal[1], max(place_z, env.ee_cmd[2] - 0.0)])
+            xy_goal = tgt[:2] + v[:2] * (2.0 * env.dt + env.act_delay_s)
+            goal = np.array([xy_goal[0], xy_goal[1], max(place_z, env.ee_cmd_future[2] - 0.0)])
             a, dyaw = self._move(goal, 0.6, yaw_tgt)
             vac = 0.0
             if P["held"] is None and self.phase_t > 0.1:
                 self._enter("retreat")
         else:  # retreat
-            goal = np.array([env.ee_cmd[0], env.ee_cmd[1], HOVER_Z])
+            goal = np.array([env.ee_cmd_future[0], env.ee_cmd_future[1], HOVER_Z])
             a, dyaw = self._move(goal, 0.25, yaw_tgt)
             vac = 0.0
         act = np.array([a[0], a[1], a[2], dyaw, vac], dtype=np.float32)
