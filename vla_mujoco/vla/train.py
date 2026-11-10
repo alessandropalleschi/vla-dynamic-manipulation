@@ -1,13 +1,14 @@
 """Behaviour-cloning trainer for the compact VLA (CPU works; use a GPU for real runs).
 
-    python -m vla_mujoco.train --data data/mj_demos --arch gru --steps 3000 --out runs/gru
+python -m vla_mujoco.vla.train --data data/mj_demos --arch gru --steps 3000 --out runs/gru
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -24,14 +25,22 @@ def load_data(path, cameras, max_eps=None):
         pos = z["tgt_pos"]
         tcp = z["proprio"][:, 12:15]
         aux = np.concatenate([pos - tcp, z["tgt_vel_y"][:, None]], 1).astype(np.float32)
-        eps.append(dict(img=[z[f"img_{c}"] for c in cameras], proprio=z["proprio"], action=z["action"],
-                        aux=aux, tok=tokenize(str(z["instruction"])), T=T))
+        eps.append(
+            dict(
+                img=[z[f"img_{c}"] for c in cameras],
+                proprio=z["proprio"],
+                action=z["action"],
+                aux=aux,
+                tok=tokenize(str(z["instruction"])),
+                T=T,
+            )
+        )
     return eps
 
 
 def make_batch(eps, B, L, chunk, dev, rng):
     imgs = [[] for _ in eps[0]["img"]]
-    pr, tgt, aux, tok, mask = [], [], [], [], []
+    pr, tgt, aux, tok = [], [], [], []
     for _ in range(B):
         e = eps[rng.integers(len(eps))]
         s = int(rng.integers(0, max(1, e["T"] - L + 1)))
@@ -45,7 +54,13 @@ def make_batch(eps, B, L, chunk, dev, rng):
         tok.append(e["tok"])
     t = lambda x: torch.from_numpy(np.asarray(x)).to(dev)  # noqa: E731
     imgs = [t(np.stack(x)).permute(0, 1, 4, 2, 3).float().div(255) for x in imgs]
-    return imgs, t(np.stack(pr)).float(), t(np.stack(aux)).float(), torch.stack(tok).to(dev), t(np.stack(tgt)).float()
+    return (
+        imgs,
+        t(np.stack(pr)).float(),
+        t(np.stack(aux)).float(),
+        torch.stack(tok).to(dev),
+        t(np.stack(tgt)).float(),
+    )
 
 
 def augment(imgs):
@@ -86,7 +101,10 @@ def main():
     model.p_mean.copy_(torch.from_numpy(allp.mean(0)))
     model.p_std.copy_(torch.from_numpy(allp.std(0) + 1e-3))
     aux_all = np.concatenate([e["aux"] for e in eps])
-    aux_mu, aux_sd = torch.from_numpy(aux_all.mean(0)).to(dev), torch.from_numpy(aux_all.std(0) + 1e-4).to(dev)
+    aux_mu, aux_sd = (
+        torch.from_numpy(aux_all.mean(0)).to(dev),
+        torch.from_numpy(aux_all.std(0) + 1e-4).to(dev),
+    )
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.05)
     out = Path(a.out)
@@ -105,8 +123,11 @@ def main():
         opt.step()
         sched.step()
         if step % 50 == 0 or step == 1:
-            print(f"step {step:5d} loss {loss.item():.4f} act {l_act.item():.4f} vac {l_vac.item():.4f} "
-                  f"aux {l_aux.item():.4f}  {time.time() - t0:.0f}s", flush=True)
+            print(
+                f"step {step:5d} loss {loss.item():.4f} act {l_act.item():.4f} vac {l_vac.item():.4f} "
+                f"aux {l_aux.item():.4f}  {time.time() - t0:.0f}s",
+                flush=True,
+            )
     torch.save({"model": model.state_dict(), "args": vars(a)}, out / "policy.pt")
     (out / "train_args.json").write_text(json.dumps(vars(a), indent=1))
     print("saved", out / "policy.pt")

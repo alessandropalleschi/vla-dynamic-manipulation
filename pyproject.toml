@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vla-mujoco"
+version = "0.2.0"
+description = "MuJoCo simulation, scripted expert and VLA baseline for dynamic stacking on a moving conveyor"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["mujoco>=3.2", "numpy", "pillow"]
+
+[project.optional-dependencies]
+train = ["torch"]                 # CPU build is enough for smoke runs; install a CUDA build for real training
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+vla-collect = "vla_mujoco.data.collect:main"
+vla-train = "vla_mujoco.vla.train:main"
+vla-eval = "vla_mujoco.vla.evaluate:main"
+vla-demo = "vla_mujoco.viz:main"
+
+[tool.setuptools.packages.find]
+include = ["vla_mujoco*"]
+
+[tool.setuptools.package-data]
+vla_mujoco = ["sim/assets/uf850/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = ["external", "scripts", "simulation"]   # legacy Gazebo/ROS code is not linted
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E741", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"vla_mujoco/sim/scene.py" = ["E501"]   # XML templates

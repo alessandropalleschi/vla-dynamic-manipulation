@@ -41,3 +41,6 @@ __pycache__/
 # MuJoCo stack outputs
 runs/
 *.gif
+*.egg-info/
+.venv/
+.ruff_cache/

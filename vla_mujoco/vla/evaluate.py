@@ -1,19 +1,18 @@
 """Closed-loop evaluation of a trained policy (or the scripted expert) in MuJoCo.
 
-    python -m vla_mujoco.evaluate --policy runs/gru/policy.pt --episodes 20
-    python -m vla_mujoco.evaluate --expert --episodes 50 --speed-range 0.05 0.12 --occlusion-s 1.0
+python -m vla_mujoco.vla.evaluate --policy runs/gru/policy.pt --episodes 20
+python -m vla_mujoco.vla.evaluate --expert --episodes 50 --speed-range 0.05 0.12 --occlusion-s 1.0
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 
 import numpy as np
-import torch
 
-from .env import DynamicStackEnv, EnvConfig
-from .expert import StackExpert
-from .policy import PolicyRunner, VLAPolicy
+from ..expert import StackExpert
+from ..sim.env import DynamicStackEnv, EnvConfig
 
 
 def main():
@@ -32,6 +31,10 @@ def main():
     runner = None
     cams = ("front", "wrist")
     if a.policy:
+        import torch  # only needed for learned policies
+
+        from .policy import PolicyRunner, VLAPolicy
+
         ck = torch.load(a.policy, map_location="cpu")
         cams = tuple(ck["args"]["cameras"])
         model = VLAPolicy(cams, arch=ck["args"]["arch"], chunk=ck["args"]["chunk"])
@@ -41,9 +44,16 @@ def main():
         ap.error("pass --policy or --expert")
     results = []
     for i in range(a.episodes):
-        cfg = EnvConfig(seed=a.seed0 + i, img_size=a.img_size, cameras=cams, render=runner is not None,
-                        belt_speed_range=tuple(a.speed_range), speed_change=a.speed_change,
-                        occlusion_s=a.occlusion_s, n_distractors=a.distractors)
+        cfg = EnvConfig(
+            seed=a.seed0 + i,
+            img_size=a.img_size,
+            cameras=cams,
+            render=runner is not None,
+            belt_speed_range=tuple(a.speed_range),
+            speed_change=a.speed_change,
+            occlusion_s=a.occlusion_s,
+            n_distractors=a.distractors,
+        )
         env = DynamicStackEnv(cfg)
         obs, info = env.reset(seed=cfg.seed)
         ex = StackExpert(env) if a.expert else None
@@ -57,12 +67,23 @@ def main():
             if term or trunc:
                 break
         P = info["priv"]
-        results.append(dict(seed=cfg.seed, success=bool(info["success"]), picked=bool(held_ever),
-                            time=info["t"], offset=P["stack_offset"], speed=env.belt_speed))
+        results.append(
+            dict(
+                seed=cfg.seed,
+                success=bool(info["success"]),
+                picked=bool(held_ever),
+                time=info["t"],
+                offset=P["stack_offset"],
+                speed=env.belt_speed,
+            )
+        )
         env.close()
         print(results[-1], flush=True)
-    m = dict(success_rate=float(np.mean([r["success"] for r in results])),
-             pick_rate=float(np.mean([r["picked"] for r in results])), episodes=len(results))
+    m = dict(
+        success_rate=float(np.mean([r["success"] for r in results])),
+        pick_rate=float(np.mean([r["picked"] for r in results])),
+        episodes=len(results),
+    )
     print(m)
     if a.json:
         json.dump({"summary": m, "episodes": results}, open(a.json, "w"), indent=1)

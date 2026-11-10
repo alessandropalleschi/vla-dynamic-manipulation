@@ -11,15 +11,18 @@ belt velocity) from the latent; it is only a training signal - inference needs n
 No pretrained weights are downloaded; swap ``ImageEncoder`` for a frozen ViT/DINO/SigLIP
 backbone and ``TextEncoder`` for a language model to scale up.
 """
+
 from __future__ import annotations
 
 import numpy as np
 import torch
 from torch import nn
 
-WORDS = ("stack the block on box moving conveyor " + " ".join(
-    ["red", "green", "blue", "yellow", "orange", "purple", "cyan", "pink"])).split()
-VOCAB = {w: i + 1 for i, w in enumerate(WORDS)}      # 0 = pad/unknown
+WORDS = (
+    "stack the block on box moving conveyor "
+    + " ".join(["red", "green", "blue", "yellow", "orange", "purple", "cyan", "pink"])
+).split()
+VOCAB = {w: i + 1 for i, w in enumerate(WORDS)}  # 0 = pad/unknown
 ACT_DIM, VAC_IDX = 5, 4
 
 
@@ -31,13 +34,15 @@ def tokenize(text: str, max_len: int = 12) -> torch.Tensor:
 class ImageEncoder(nn.Module):
     def __init__(self, out=128):
         super().__init__()
+
         def blk(i, o):
             return nn.Sequential(nn.Conv2d(i, o, 3, 2, 1), nn.GroupNorm(8, o), nn.GELU())
+
         self.net = nn.Sequential(blk(3, 32), blk(32, 64), blk(64, 96), blk(96, 128))
-        self.kp = nn.Conv2d(128, 32, 1)          # spatial-softmax keypoints keep position info
+        self.kp = nn.Conv2d(128, 32, 1)  # spatial-softmax keypoints keep position info
         self.fc = nn.Linear(32 * 2 + 128, out)
 
-    def forward(self, x):                         # x: (B,3,H,W) float in [0,1]
+    def forward(self, x):  # x: (B,3,H,W) float in [0,1]
         f = self.net(x - 0.5)
         B, C, H, W = f.shape
         k = torch.softmax(self.kp(f).flatten(2), -1).view(B, 32, H, W)
@@ -48,13 +53,14 @@ class ImageEncoder(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    def __init__(self, out=64, vocab=len(VOCAB) + 1):
+    def __init__(self, out=64, vocab=None):
         super().__init__()
+        vocab = vocab or len(VOCAB) + 1
         self.emb = nn.Embedding(vocab, out, padding_idx=0)
         self.pos = nn.Parameter(torch.randn(12, out) * 0.02)
         self.proj = nn.Sequential(nn.Linear(out, out), nn.GELU())
 
-    def forward(self, tok):                       # (B,12)
+    def forward(self, tok):  # (B,12)
         e = (self.emb(tok) + self.pos) * (tok > 0).unsqueeze(-1)
         return self.proj(e.sum(1) / (tok > 0).sum(1, keepdim=True).clamp(min=1))
 
@@ -69,10 +75,14 @@ class VLAPolicy(nn.Module):
         self.prop = nn.Sequential(nn.Linear(proprio_dim, 64), nn.GELU())
         feat = 128 * len(cameras) + 64 + 64
         mult = window if arch == "stack" else 1
-        self.fuse = nn.Sequential(nn.Linear(feat * mult, hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU())
+        self.fuse = nn.Sequential(
+            nn.Linear(feat * mult, hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU()
+        )
         self.gru = nn.GRU(hidden, hidden, batch_first=True) if arch == "gru" else None
         self.head = nn.Sequential(nn.Linear(hidden, hidden), nn.GELU(), nn.Linear(hidden, chunk * ACT_DIM))
-        self.aux = nn.Sequential(nn.Linear(hidden, 64), nn.GELU(), nn.Linear(64, 4))  # tgt-rel-tool xyz, belt vy
+        self.aux = nn.Sequential(
+            nn.Linear(hidden, 64), nn.GELU(), nn.Linear(64, 4)
+        )  # tgt-rel-tool xyz, belt vy
         self.register_buffer("p_mean", torch.zeros(proprio_dim))
         self.register_buffer("p_std", torch.ones(proprio_dim))
         self.hidden = hidden
@@ -86,9 +96,11 @@ class VLAPolicy(nn.Module):
         return torch.cat(f + [t, p], -1)
 
     def forward(self, imgs, proprio, tok, h0=None):
-        x = self.step_features(imgs, proprio, tok)           # (B,T,F)
-        if self.arch == "stack":                              # concat the last `window` features
-            x = torch.cat([torch.cat([x[:, :1].repeat(1, k, 1), x], 1)[:, : x.shape[1]] for k in range(self.window)], -1)
+        x = self.step_features(imgs, proprio, tok)  # (B,T,F)
+        if self.arch == "stack":  # concat the last `window` features
+            x = torch.cat(
+                [torch.cat([x[:, :1].repeat(1, k, 1), x], 1)[:, : x.shape[1]] for k in range(self.window)], -1
+            )
         z = self.fuse(x)
         h = None
         if self.gru is not None:
@@ -112,12 +124,14 @@ class PolicyRunner:
     def act(self, obs) -> np.ndarray:
         if self.tok is None:
             self.tok = tokenize(obs["instruction"]).unsqueeze(0).to(self.dev)
-        imgs = [torch.from_numpy(obs["images"][c]).permute(2, 0, 1).float().div(255)[None, None].to(self.dev)
-                for c in self.p.cameras]
+        imgs = [
+            torch.from_numpy(obs["images"][c]).permute(2, 0, 1).float().div(255)[None, None].to(self.dev)
+            for c in self.p.cameras
+        ]
         pr = torch.from_numpy(obs["proprio"])[None, None].to(self.dev)
         if self.p.arch == "stack":
             self.hist.append((imgs, pr))
-            self.hist = self.hist[-self.p.window:]
+            self.hist = self.hist[-self.p.window :]
             hs = [self.hist[0]] * (self.p.window - len(self.hist)) + self.hist
             imgs = [torch.cat([h[0][i] for h in hs], 1) for i in range(len(self.p.cameras))]
             pr = torch.cat([h[1] for h in hs], 1)

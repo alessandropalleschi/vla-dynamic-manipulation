@@ -1,8 +1,9 @@
 """Fast checks for the MuJoCo stack (no rendering needed). Run: pytest tests/test_mujoco_env.py"""
+
 import numpy as np
 
-from vla_mujoco.env import DynamicStackEnv, EnvConfig
 from vla_mujoco.expert import StackExpert
+from vla_mujoco.sim.env import DynamicStackEnv, EnvConfig
 
 
 def make(seed=0, **kw):
@@ -25,7 +26,7 @@ def test_ik_reaches_pose():
     assert ok
     p, R = env._fk(q)
     assert np.allclose(p, [0.5, 0.2, 0.2], atol=1e-3)
-    assert np.allclose(R[:, 2], [0, 0, -1], atol=1e-2)       # tool points down
+    assert np.allclose(R[:, 2], [0, 0, -1], atol=1e-2)  # tool points down
 
 
 def test_belt_carries_box_at_commanded_speed():
@@ -49,7 +50,7 @@ def test_noop_policy_does_not_succeed():
 def test_suction_needs_seal_and_dwell():
     env = make()
     env.reset(seed=3)
-    env.step(np.array([0, 0, 0, 0, 1.0]))                    # vacuum on in free air: nothing held
+    env.step(np.array([0, 0, 0, 0, 1.0]))  # vacuum on in free air: nothing held
     assert env.held is None
 
 

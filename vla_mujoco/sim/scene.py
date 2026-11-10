@@ -8,6 +8,7 @@ is gravity-compensated and driven by position actuators, so they matter little.
 World frame: +z up, robot base at the origin on a table whose top is z=0.
 The conveyor runs along +y at x=BELT_X with its top surface at z=BELT_TOP.
 """
+
 from __future__ import annotations
 
 import math
@@ -21,20 +22,27 @@ BELT_X = 0.62
 BELT_TOP = 0.06
 BELT_HALF_W = 0.15
 BELT_HALF_L = 1.2
-TGT_HALF = 0.06          # target ("lower") box half-size (12 cm cube)
-SRC_HALF = 0.05          # source ("upper") block half-size (10 cm cube: must cover all 4 cups)
+TGT_HALF = 0.06  # target ("lower") box half-size (12 cm cube)
+SRC_HALF = 0.05  # source ("upper") block half-size (10 cm cube: must cover all 4 cups)
 
 # VGC10 geometry, mirrored from scripts/uf850_tool_urdf.py and the generated
 # simulation/generated/uf850_vgc10.urdf used by the Gazebo stack (link6 frame, tool +z outward):
 #   mount 15 mm out from link6, flipped 180 deg about x; body box 101x100x100 mm;
 #   4 cups, 40 mm dia (r=20.2 mm), 44 mm pitch; TCP at the cup face.
 TOOL_MOUNT_Z = 0.015
-TOOL_TCP_Z = 0.1894      # link6 -> cup face
+TOOL_TCP_Z = 0.1894  # link6 -> cup face
 CUP_R = 0.0202
 CUP_XY = 0.022
-CUP_TOP_Z = 0.1051       # link6 z where the single-cup STL starts (body -0.0901 flipped)
-VGC10_MESH_DIR = (Path(__file__).resolve().parents[1] / "external" / "onrobot_ros_assets"
-                  / "onrobot_vg_description" / "meshes" / "vgc10" / "visual")
+CUP_TOP_Z = 0.1051  # link6 z where the single-cup STL starts (body -0.0901 flipped)
+VGC10_MESH_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "external"
+    / "onrobot_ros_assets"
+    / "onrobot_vg_description"
+    / "meshes"
+    / "vgc10"
+    / "visual"
+)
 
 # (xyz, rpy) of each joint frame relative to its parent link (uf850_default_kinematics.yaml)
 JOINT_FRAMES = [
@@ -61,10 +69,22 @@ KV = [90, 90, 70, 25, 12, 8]
 
 def rpy_to_quat(r: float, p: float, y: float) -> np.ndarray:
     """URDF rpy (fixed-axis x, y, z) -> MuJoCo quaternion (w, x, y, z)."""
-    cr, sr, cp, sp, cy, sy = (math.cos(r / 2), math.sin(r / 2), math.cos(p / 2),
-                              math.sin(p / 2), math.cos(y / 2), math.sin(y / 2))
-    return np.array([cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy,
-                     cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy])
+    cr, sr, cp, sp, cy, sy = (
+        math.cos(r / 2),
+        math.sin(r / 2),
+        math.cos(p / 2),
+        math.sin(p / 2),
+        math.cos(y / 2),
+        math.sin(y / 2),
+    )
+    return np.array(
+        [
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+        ]
+    )
 
 
 def _f(v) -> str:
@@ -72,12 +92,23 @@ def _f(v) -> str:
 
 
 def build_mjcf(img_size: int = 128) -> str:
-    have_vgc = (VGC10_MESH_DIR / "base_link_4cups.stl").is_file() and (VGC10_MESH_DIR / "suction_cup_1cup.stl").is_file()
-    vgc_assets = (f'''<mesh name="vgc10_body" file="{VGC10_MESH_DIR / "base_link_4cups.stl"}"/>
-    <mesh name="vgc10_cup" file="{VGC10_MESH_DIR / "suction_cup_1cup.stl"}"/>''' if have_vgc else "")
-    meshes = "\n    ".join(
-        f'<mesh name="{n}" file="{n}.stl"/>'
-        for n in ["link_base", "link1", "link2", "link3", "link4", "link5", "link6"]) + "\n    " + vgc_assets
+    have_vgc = (VGC10_MESH_DIR / "base_link_4cups.stl").is_file() and (
+        VGC10_MESH_DIR / "suction_cup_1cup.stl"
+    ).is_file()
+    vgc_assets = (
+        f'''<mesh name="vgc10_body" file="{VGC10_MESH_DIR / "base_link_4cups.stl"}"/>
+    <mesh name="vgc10_cup" file="{VGC10_MESH_DIR / "suction_cup_1cup.stl"}"/>'''
+        if have_vgc
+        else ""
+    )
+    meshes = (
+        "\n    ".join(
+            f'<mesh name="{n}" file="{n}.stl"/>'
+            for n in ["link_base", "link1", "link2", "link3", "link4", "link5", "link6"]
+        )
+        + "\n    "
+        + vgc_assets
+    )
 
     # nested arm bodies
     arm = ""
@@ -85,10 +116,12 @@ def build_mjcf(img_size: int = 128) -> str:
     closers = []
     for i, ((xyz, rpy), (lo, hi)) in enumerate(zip(JOINT_FRAMES, JOINT_LIMITS), start=1):
         q = rpy_to_quat(*rpy)
-        arm += (f'{indent}<body name="link{i}" pos="{_f(xyz)}" quat="{_f(q)}" gravcomp="1">\n'
-                f'{indent}  <joint name="joint{i}" axis="0 0 1" range="{lo:.6g} {hi:.6g}" '
-                f'damping="2" armature="0.05"/>\n'
-                f'{indent}  <geom type="mesh" mesh="link{i}" mass="{LINK_MASS[i]}" class="arm"/>\n')
+        arm += (
+            f'{indent}<body name="link{i}" pos="{_f(xyz)}" quat="{_f(q)}" gravcomp="1">\n'
+            f'{indent}  <joint name="joint{i}" axis="0 0 1" range="{lo:.6g} {hi:.6g}" '
+            f'damping="2" armature="0.05"/>\n'
+            f'{indent}  <geom type="mesh" mesh="link{i}" mass="{LINK_MASS[i]}" class="arm"/>\n'
+        )
         closers.append(f"{indent}</body>\n")
         indent += "  "
     # tool: VGC10, same frames as the Gazebo URDF. Real OnRobot STLs are visual-only (as in the
@@ -97,13 +130,21 @@ def build_mjcf(img_size: int = 128) -> str:
     cx = CUP_XY
     cup_pos = [(-cx, cx), (cx, cx), (-cx, -cx), (cx, -cx)]
     if have_vgc:
-        vis = (f'{indent}  <geom type="mesh" mesh="vgc10_body" pos="0 0 {TOOL_MOUNT_Z}" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
-               + "".join(f'{indent}  <geom type="mesh" mesh="vgc10_cup" pos="{x} {y} {CUP_TOP_Z}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
-                         for x, y in cup_pos))
+        vis = (
+            f'{indent}  <geom type="mesh" mesh="vgc10_body" pos="0 0 {TOOL_MOUNT_Z}" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
+            + "".join(
+                f'{indent}  <geom type="mesh" mesh="vgc10_cup" pos="{x} {y} {CUP_TOP_Z}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
+                for x, y in cup_pos
+            )
+        )
     else:  # fallback if the OnRobot meshes are not present
-        vis = (f'{indent}  <geom type="box" size="0.0505 0.05 0.045" pos="0 0 0.06" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
-               + "".join(f'{indent}  <geom type="cylinder" size="{CUP_R} 0.042" pos="{x} {y} {TOOL_TCP_Z - 0.042}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
-                         for x, y in cup_pos))
+        vis = (
+            f'{indent}  <geom type="box" size="0.0505 0.05 0.045" pos="0 0 0.06" class="toolvis" rgba="0.24 0.26 0.29 1"/>\n'
+            + "".join(
+                f'{indent}  <geom type="cylinder" size="{CUP_R} 0.042" pos="{x} {y} {TOOL_TCP_Z - 0.042}" class="toolvis" rgba="0.08 0.09 0.1 1"/>\n'
+                for x, y in cup_pos
+            )
+        )
     tool = f"""{indent}<body name="tool" pos="0 0 0" gravcomp="1">
 {indent}  <geom type="box" size="0.0505 0.05 0.05" pos="0 0 {TOOL_MOUNT_Z + 0.05}" mass="0.774" class="toolcol"/>
 {vis}{indent}  <site name="tcp" pos="0 0 {TOOL_TCP_Z}" size="0.004" rgba="1 0 0 1"/>
@@ -115,11 +156,14 @@ def build_mjcf(img_size: int = 128) -> str:
     act = "\n    ".join(
         f'<position name="act{i + 1}" joint="joint{i + 1}" kp="{KP[i]}" kv="{KV[i]}" '
         f'ctrlrange="{JOINT_LIMITS[i][0]:.6g} {JOINT_LIMITS[i][1]:.6g}" '
-        f'forcerange="-{EFFORT[i]} {EFFORT[i]}"/>' for i in range(6))
+        f'forcerange="-{EFFORT[i]} {EFFORT[i]}"/>'
+        for i in range(6)
+    )
 
     box_geom = lambda half, rgba, mass: (  # noqa: E731
         f'<geom type="box" size="{half} {half} {half}" mass="{mass}" rgba="{rgba}" '
-        f'class="obj" friction="1.0 0.01 0.001"/>')
+        f'class="obj" friction="1.0 0.01 0.001"/>'
+    )
 
     return f"""<mujoco model="uf850_dynamic_stack">
   <compiler angle="radian" meshdir="{ASSET_DIR}" autolimits="true"/>

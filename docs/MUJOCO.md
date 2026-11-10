@@ -15,21 +15,22 @@ No ROS, no Docker, no GPU needed for simulation (headless EGL rendering works in
 | Domain randomisation | manual | colors, friction, mass, belt speed, speed jumps, distractor, occlusion |
 
 ## Quick start
+See the README for the dev-container flow. Manually:
 ```bash
-pip install -r requirements-mujoco.txt
+pip install -e ".[train,dev]"
 export MUJOCO_GL=egl            # headless; use `glfw` with a display, `osmesa` if no EGL
-pytest tests/test_mujoco_env.py
-python -m vla_mujoco.render_demo --seed 3 --out demo.gif      # watch the expert
-python -m vla_mujoco.collect --out data/mj_demos --episodes 200 --workers 4
-python -m vla_mujoco.train --data data/mj_demos --arch gru --steps 20000 --out runs/gru
-python -m vla_mujoco.evaluate --policy runs/gru/policy.pt --episodes 50
-python -m vla_mujoco.evaluate --expert --episodes 50 --speed-range 0.08 0.14
+pytest
+python -m vla_mujoco.viz --seed 3 --out demo.gif                       # watch the expert  (vla-demo)
+python -m vla_mujoco.data.collect --out data/mj_demos --episodes 200 --workers 4   # (vla-collect)
+python -m vla_mujoco.vla.train --data data/mj_demos --arch gru --steps 20000 --out runs/gru   # (vla-train)
+python -m vla_mujoco.vla.evaluate --policy runs/gru/policy.pt --episodes 50                   # (vla-eval)
+python -m vla_mujoco.vla.evaluate --expert --episodes 50 --speed-range 0.08 0.14
 ```
 (For a GL-less container: `apt-get install libegl1`; EGL then falls back to llvmpipe.)
 
-## Environment (`vla_mujoco/env.py`)
+## Environment (`vla_mujoco/sim/env.py`)
 * **Robot**: UF850 kinematics, joint limits and (collision) meshes from UFACTORY `xarm_ros2` (BSD-3, license
-  in `assets/uf850/`). Arm is gravity-compensated with position actuators; masses are approximate.
+  in `sim/assets/uf850/`). Arm is gravity-compensated with position actuators; masses are approximate.
 * **Tool**: the same VGC10 setup as the Gazebo stack (`scripts/uf850_tool_urdf.py`): mount 15 mm from link6 flipped
   180 deg, 101x100x100 mm body proxy for collision, 4 cups of 40 mm / 44 mm pitch, TCP 0.1894 m from link6. The
   real OnRobot `base_link_4cups.stl` / `suction_cup_1cup.stl` (MIT, `external/onrobot_ros_assets`) are used as
@@ -61,10 +62,10 @@ python -m vla_mujoco.evaluate --expert --episodes 50 --speed-range 0.08 0.14
 | speed jump + occlusion | 40/40 |
 | fast belt 0.08-0.14 m/s | 40/40 |
 
-`collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
+`data/collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.
 
-## Policy (`policy.py`, `train.py`, `evaluate.py`)
+## Policy (`vla/policy.py`, `vla/train.py`, `vla/evaluate.py`)
 Compact baseline: CNN (spatial-softmax) per camera + word-level text encoder + proprio MLP -> action **chunks**
 (8 steps), with an auxiliary head that regresses the target's position relative to the tool and belt velocity
 (a belief-style training signal; unused at inference). `--arch {mlp,stack,gru}` gives the memory ablation from

@@ -1,5 +1,0 @@
-mujoco>=3.2
-numpy
-pillow
-torch          # CPU is enough for the smoke run; use a CUDA build for real training
-pytest         # tests only

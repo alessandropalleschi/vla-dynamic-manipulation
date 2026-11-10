@@ -10,15 +10,16 @@ The transfer phase solves a constant-velocity intercept (target position at the 
 tool arrives); the final descent is closed-loop on the live target pose with belt
 feed-forward, and the release is timed to absorb the VGC10 vacuum-release delay.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-from .env import MAX_STEP_M, MAX_STEP_YAW, RELEASE_TIME_S, DynamicStackEnv
-from .scene import BELT_TOP, SRC_HALF, TGT_HALF, TOOL_TCP_Z  # noqa: F401
+from .sim.env import MAX_STEP_M, MAX_STEP_YAW, RELEASE_TIME_S, DynamicStackEnv
+from .sim.scene import SRC_HALF, TGT_HALF
 
 HOVER_Z = 0.36
-PLACE_GAP = 0.004            # block bottom above target top at release (m)
+PLACE_GAP = 0.004  # block bottom above target top at release (m)
 
 
 def _wrap_quarter(yaw):
@@ -30,7 +31,7 @@ class StackExpert:
     def __init__(self, env: DynamicStackEnv, seed: int = 0, noise: float = 0.0):
         self.env = env
         self.rng = np.random.default_rng(seed)
-        self.noise = noise           # std of Gaussian action noise (DART-style) in action units
+        self.noise = noise  # std of Gaussian action noise (DART-style) in action units
         self.reset()
 
     def reset(self):
@@ -65,7 +66,7 @@ class StackExpert:
         src, tgt = P["src_pos"], P["tgt_pos"]
         v = np.array([0.0, P["belt_vel"][1], 0.0])
         yaw_src = _wrap_quarter(P["src_yaw"])
-        held_h = 2 * SRC_HALF                       # block bottom is this far below the TCP
+        held_h = 2 * SRC_HALF  # block bottom is this far below the TCP
         tcp_to_src_top = np.array([src[0], src[1], src[2] + SRC_HALF])
 
         if self.phase == "approach":

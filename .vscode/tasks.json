@@ -1,0 +1,10 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Test", "type": "shell", "command": "make test", "group": { "kind": "test", "isDefault": true } },
+    { "label": "Lint", "type": "shell", "command": "make lint" },
+    { "label": "Render expert demo", "type": "shell", "command": "make demo" },
+    { "label": "Collect demos", "type": "shell", "command": "make collect" },
+    { "label": "Train (GRU)", "type": "shell", "command": "make train" }
+  ]
+}

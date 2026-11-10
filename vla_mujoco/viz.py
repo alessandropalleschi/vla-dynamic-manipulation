@@ -1,14 +1,15 @@
 """Render an expert episode to a GIF (3 cameras side by side).
 
-    python -m vla_mujoco.render_demo --seed 3 --out demo.gif
+python -m vla_mujoco.viz --seed 3 --out demo.gif
 """
+
 import argparse
 
 import numpy as np
 from PIL import Image
 
-from .env import DynamicStackEnv, EnvConfig
 from .expert import StackExpert
+from .sim.env import DynamicStackEnv, EnvConfig
 
 
 def main():
@@ -30,8 +31,10 @@ def main():
             frames.append(Image.fromarray(np.hstack([obs["images"][c] for c in cams])))
         if term or trunc:
             break
-    print(obs["instruction"], "| success:", info["success"], "| t=%.1fs" % info["t"])
-    frames[0].save(a.out, save_all=True, append_images=frames[1:], duration=int(1000 * env.dt * a.every), loop=0)
+    print(obs["instruction"], "| success:", info["success"], f"| t={info['t']:.1f}s")
+    frames[0].save(
+        a.out, save_all=True, append_images=frames[1:], duration=int(1000 * env.dt * a.every), loop=0
+    )
     frames[-1].save(a.out.replace(".gif", "_last.png"))
     print("wrote", a.out)
 

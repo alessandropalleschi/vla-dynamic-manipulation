@@ -1,58 +1,87 @@
 # VLA for Dynamic Robotic Manipulation
 
-A simulation framework for studying **Vision-Language-Action (VLA) learning** in dynamic robotic manipulation, with a focus on moving-object interaction and reasoning under visual occlusion.
+A simulation framework for **Vision-Language-Action (VLA) learning** on *dynamic stacking*: a UF850 arm with an
+OnRobot VGC10 vacuum gripper picks a block and stacks it onto a box that is **moving on a conveyor**, with
+language-specified targets, distractors, speed changes and visual occlusion.
 
-## Overview
+![status](https://img.shields.io/badge/sim-MuJoCo-blue) ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-The environment features a UF850 robotic arm equipped with an OnRobot VGC10 vacuum gripper. The robot picks up objects and stacks them onto moving targets on a conveyor belt.
+| Stack | Location | Status |
+|---|---|---|
+| **MuJoCo** (fast, deterministic, no ROS) | [`vla_mujoco/`](vla_mujoco/) | active — environment, scripted expert, data pipeline, VLA baseline |
+| Gazebo Harmonic + ROS 2 + MoveIt 2 | `scripts/`, `docker/`, `simulation/`, `compose*.yaml` | legacy, kept working |
 
-The project provides a scripted manipulation policy and an RGB demonstration-recording pipeline as a foundation for learning-based control.
+## Quick start (MuJoCo)
 
-## MuJoCo simulation (recommended)
+**VS Code:** open the folder and choose *Reopen in Container* (`.devcontainer/`). It installs Python 3.12, headless EGL,
+all dependencies and the recommended extensions, then runs the tests.
 
-A faster, deterministic, ROS-free simulator lives in [`vla_mujoco/`](vla_mujoco/) with a dynamic-stacking
-environment, a scripted expert, demo collection, and a trainable VLA baseline. See
-[`docs/MUJOCO.md`](docs/MUJOCO.md).
-
+**Local:**
 ```bash
-pip install -r requirements-mujoco.txt && export MUJOCO_GL=egl
-python -m vla_mujoco.render_demo --seed 3 --out demo.gif
-python -m vla_mujoco.collect --out data/mj_demos --episodes 200
-python -m vla_mujoco.train --data data/mj_demos --arch gru --steps 20000
+python -m venv .venv && source .venv/bin/activate
+make install                  # = pip install -e ".[train,dev]"
+export MUJOCO_GL=egl          # headless GPU/software rendering (glfw if you have a display)
+make test                     # simulator tests, ~3 s
+make demo                     # expert episode -> demo.gif
+make collect                  # 200 expert demos -> data/mj_demos
+make train                    # behaviour-cloning baseline -> runs/gru
+```
+A GL-less container needs `apt-get install libegl1` (Mesa software rendering is then used).
+
+## What's in the MuJoCo stack
+
+```
+vla_mujoco/
+  sim/      scene.py (MJCF generator), env.py (Gymnasium-style DynamicStackEnv), assets/ (UF850 meshes)
+  expert.py privileged scripted expert: grasp -> intercept -> track & descend -> timed release
+  data/     collect.py   parallel demo collection (images, proprio, actions, privileged labels)
+  vla/      policy.py (CNN + text + proprio -> action chunks; mlp | stack | gru memory ablation),
+            train.py, evaluate.py
+  viz.py    render an episode to GIF
+tests/      simulator + expert tests (no GPU, no rendering)
+docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), legacy/ (Gazebo-era notes)
 ```
 
-The Gazebo/ROS 2 pipeline below remains as the legacy stack.
+* **Observations** — `front` / `wrist` / `overhead` RGB, 22-D proprioception, language instruction. Privileged state is
+  confined to `info["priv"]`, so deployed policies never see it.
+* **Actions** — bounded Cartesian deltas `[dx, dy, dz, dyaw, vacuum]` resolved by IK.
+* **Hard modes** — belt speed range, surprise speed jumps, an occluder panel hiding the target from the front camera,
+  distractor boxes (the instruction names colours, so language must be grounded).
+* **Expert** — stacks 40/40 episodes in each of: default belt speeds, speed-jump + occlusion, and fast belts
+  (0.08–0.14 m/s).
+* **Console scripts** after install: `vla-demo`, `vla-collect`, `vla-train`, `vla-eval`.
 
-## Tech Stack
+Read [`docs/MUJOCO.md`](docs/MUJOCO.md) for the gripper model, success definition, limitations and next steps.
+The learned-policy baseline is a scaffold (no pretrained weights); no benchmark numbers are claimed for it yet.
 
-- **ROS 2 Jazzy** — Robot control and communication
-- **Gazebo Harmonic** — Physics simulation
-- **MoveIt 2** — Motion planning
-- **Docker** — Reproducible environment
-- **Python** — Control, data collection, and learning
+## Research directions
 
-## Quick Start
+Dynamic manipulation and moving-target interception · vision-based tracking · learning from demonstrations ·
+belief-state estimation under occlusion · VLA policies. The planned memory comparison (single-frame vs window vs
+recurrent vs RSSM) is described in [`docs/next_steps.md`](docs/next_steps.md).
 
-Run a moving-target stacking experiment:
+## Development
 
 ```bash
-bash scripts/run_uf850_moving_stack_trial.sh
+make lint      # ruff check + format check (legacy scripts/ is excluded)
+make format
+make test
 ```
+CI (`.github/workflows/ci.yml`) runs lint and tests on every push. VS Code tasks/launch configs for demo, collection,
+training and evaluation are in `.vscode/`.
 
-Record an RGB demonstration:
+## Legacy Gazebo / ROS 2 stack
+
+ROS 2 Jazzy + Gazebo Harmonic + MoveIt 2 in Docker (requires an NVIDIA GPU host):
 
 ```bash
-bash scripts/record_and_run_uf850_v9.sh
+bash scripts/run_uf850_moving_stack_trial.sh      # moving-target stacking trial
+bash scripts/record_and_run_uf850_v9.sh           # synchronized RGB demonstration
 ```
+Its scripts hardcode `/workspace/...` container paths and therefore stay under `scripts/`
+(see [`scripts/README.md`](scripts/README.md)). Historical version notes are in [`docs/legacy/`](docs/legacy/).
 
-## Research Directions
+## Licenses and third-party assets
 
-- Dynamic manipulation and moving-target interception
-- Vision-based object tracking
-- Learning from expert demonstrations
-- Belief-state estimation under visual occlusion
-- Vision-Language-Action policies
-
-## Status
-
-The simulation supports moving-conveyor stacking and synchronized RGB demonstration recording. Learning-based control and occlusion-aware belief estimation are under development.
+UF850 meshes/kinematics: UFACTORY `xarm_ros2` (BSD-3, `vla_mujoco/sim/assets/uf850/LICENSE_xarm_ros2.txt`).
+VGC10 meshes: `UOsaka-Harada-Laboratory/onrobot` (MIT, `external/onrobot_ros_assets/`).

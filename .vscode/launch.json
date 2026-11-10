@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Expert demo (GIF)",
+      "type": "debugpy", "request": "launch", "module": "vla_mujoco.viz",
+      "args": ["--seed", "3", "--out", "demo.gif"],
+      "env": { "MUJOCO_GL": "egl" }, "console": "integratedTerminal"
+    },
+    {
+      "name": "Collect 8 demos",
+      "type": "debugpy", "request": "launch", "module": "vla_mujoco.data.collect",
+      "args": ["--out", "data/mj_debug", "--episodes", "8", "--workers", "1"],
+      "env": { "MUJOCO_GL": "egl" }, "console": "integratedTerminal"
+    },
+    {
+      "name": "Train (short)",
+      "type": "debugpy", "request": "launch", "module": "vla_mujoco.vla.train",
+      "args": ["--data", "data/mj_demos", "--steps", "50", "--out", "runs/debug"],
+      "env": { "MUJOCO_GL": "egl" }, "console": "integratedTerminal"
+    },
+    {
+      "name": "Evaluate expert",
+      "type": "debugpy", "request": "launch", "module": "vla_mujoco.vla.evaluate",
+      "args": ["--expert", "--episodes", "5"],
+      "env": { "MUJOCO_GL": "egl" }, "console": "integratedTerminal"
+    },
+    {
+      "name": "Pytest (current file)",
+      "type": "debugpy", "request": "launch", "module": "pytest", "args": ["${file}"],
+      "console": "integratedTerminal"
+    }
+  ]
+}

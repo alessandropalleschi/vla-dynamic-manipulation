@@ -1,23 +1,24 @@
 """Collect expert demonstrations (images + proprio + actions + privileged labels).
 
-    python -m vla_mujoco.collect --out data/mj_demos --episodes 200 --workers 4
+    python -m vla_mujoco.data.collect --out data/mj_demos --episodes 200 --workers 4
 
 One compressed ``.npz`` per successful episode. Keys: ``img_<cam>`` (T,H,W,3 uint8),
 ``proprio`` (T,22), ``action`` (T,5), ``instruction``, and privileged labels used for
 auxiliary losses / analysis only: ``tgt_pos`` (T,3), ``tgt_vel_y`` (T,), ``src_pos``,
 ``occluded`` (T,), ``phase`` (T,).
 """
+
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 import json
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
-from .env import DynamicStackEnv, EnvConfig
-from .expert import StackExpert
+from ..expert import StackExpert
+from ..sim.env import DynamicStackEnv, EnvConfig
 
 PHASES = ["approach", "descend", "lift", "transfer", "track", "release", "retreat"]
 
@@ -70,8 +71,13 @@ def main():
     ap.add_argument("--occlusion-s", type=float, default=0.0)
     ap.add_argument("--distractors", type=int, default=1)
     a = ap.parse_args()
-    cfg = dict(img_size=a.img_size, belt_speed_range=tuple(a.speed_range), speed_change=a.speed_change,
-               occlusion_s=a.occlusion_s, n_distractors=a.distractors)
+    cfg = dict(
+        img_size=a.img_size,
+        belt_speed_range=tuple(a.speed_range),
+        speed_change=a.speed_change,
+        occlusion_s=a.occlusion_s,
+        n_distractors=a.distractors,
+    )
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "config.json").write_text(json.dumps({**cfg, "noise": a.noise}, indent=1))
