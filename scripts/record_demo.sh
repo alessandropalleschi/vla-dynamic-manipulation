@@ -36,6 +36,26 @@ fi
 echo "PASS: MoveIt planning service ready"
 "${C[@]}" exec -T sim bash -lc 'source /opt/ros/jazzy/setup.bash; for i in $(seq 1 45); do gz topic -l | grep -qx /station/overhead/image && exit 0; sleep 1; done; echo "No camera topic"; exit 2'
 "${C[@]}" exec -T sim bash -lc 'source /opt/ros/jazzy/setup.bash; gz topic -t /conveyor/speed -m gz.msgs.Double -p "data: 0"; /usr/bin/python3 /workspace/scripts/check_gz_box_pose_v7.py'
+# VLA_ROS_READY_CHECK
+echo "== Waiting for ROS clock and joint states =="
+
+"${C[@]}" exec -T moveit bash -lc '
+source /opt/ros/jazzy/setup.bash
+
+for attempt in $(seq 1 12); do
+    if timeout 8 ros2 topic echo /clock --once         --qos-reliability best_effort >/dev/null 2>&1 &&
+       timeout 8 ros2 topic echo /joint_states --once         --qos-reliability best_effort >/dev/null 2>&1; then
+        echo "PASS: ROS clock and joint states ready"
+        exit 0
+    fi
+
+    sleep 1
+done
+
+echo "BLOCKED: ROS streams not ready" >&2
+exit 2
+'
+
 "${C[@]}" exec -T \
   -e "VLA_BELT_SPEED_M_S=${VLA_BELT_SPEED_M_S:-0.020}" \
   -e "VLA_WARMUP_SIM_S=${VLA_WARMUP_SIM_S:-0}" \

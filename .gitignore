@@ -33,3 +33,7 @@ __pycache__/
 *.log
 *.mp4
 *.zip
+
+# Gazebo plugin build artifacts
+/simulation/plugins/**/build/
+/simulation/plugins/**/build.*/
