@@ -35,9 +35,8 @@ def check_cuda() -> bool:
         x = x @ x
         x = x / x.norm()
     torch.cuda.synchronize()
-    print(
-        f"[cuda]   10 matmuls 4096x4096: {(time.time() - t) * 1000:.0f} ms (bf16 ok: {torch.cuda.is_bf16_supported()})"
-    )
+    ms = (time.time() - t) * 1000
+    print(f"[cuda]   10 matmuls 4096x4096: {ms:.0f} ms (bf16 ok: {torch.cuda.is_bf16_supported()})")
     return True
 
 
