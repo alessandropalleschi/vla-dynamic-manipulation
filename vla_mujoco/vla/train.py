@@ -64,14 +64,17 @@ def make_batch(eps, B, L, chunk, dev, rng):
 
 
 def augment(imgs):
-    """Cheap photometric + shift augmentation, per sequence."""
+    """Per-sequence, per-camera photometric + shift augmentation (on top of simulator randomisation)."""
     out = []
-    for im in imgs:
-        B = im.shape[0]
-        g = 1 + 0.15 * (torch.rand(B, 1, 1, 1, 1, device=im.device) - 0.5) * 2
-        b = 0.08 * (torch.rand(B, 1, 1, 1, 1, device=im.device) - 0.5) * 2
-        im = (im * g + b).clamp(0, 1)
-        dx, dy = np.random.randint(-3, 4, 2)
+    for im in imgs:  # (B, T, 3, H, W) in [0, 1]
+        B, dev = im.shape[0], im.device
+        gain = 1 + 0.2 * (torch.rand(B, 1, 3, 1, 1, device=dev) - 0.5) * 2  # per-channel colour gain
+        bias = 0.1 * (torch.rand(B, 1, 1, 1, 1, device=dev) - 0.5) * 2
+        mean = im.mean((2, 3, 4), keepdim=True)
+        contrast = 1 + 0.25 * (torch.rand(B, 1, 1, 1, 1, device=dev) - 0.5) * 2
+        im = ((im - mean) * contrast + mean) * gain + bias
+        im = (im + 0.02 * torch.randn_like(im[:, :1])).clamp(0, 1)
+        dx, dy = np.random.randint(-4, 5, 2)
         out.append(torch.roll(im, (int(dy), int(dx)), (3, 4)))
     return out
 

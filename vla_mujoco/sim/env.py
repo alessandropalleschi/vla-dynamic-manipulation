@@ -29,7 +29,8 @@ from dataclasses import dataclass, field
 import mujoco
 import numpy as np
 
-from .scene import BELT_TOP, BELT_X, CUP_R, CUP_XY, SRC_HALF, TGT_HALF, build_mjcf
+from .randomize import DomainRandomizer
+from .scene import BELT_TOP, CUP_R, CUP_XY, SRC_HALF, TGT_HALF, build_mjcf
 
 PROPRIO_DIM = 22
 MAX_STEP_M = 0.015  # per control step at action = 1  (0.3 m/s at 20 Hz)
@@ -66,6 +67,10 @@ class EnvConfig:
     occlusion_s: float = 0.0  # >0: a panel hides the target from `front` for this long
     randomize_colors: bool = True
     randomize_physics: bool = True
+    randomize_conveyor: bool = True  # belt x-offset + yaw
+    randomize_camera: bool = True  # camera pose / fov (front, overhead, wrist)
+    randomize_appearance: bool = True  # object/scene colours, sizes, lighting
+    dr_scale: float = 1.0  # multiplies all randomisation ranges (>1 for out-of-distribution tests)
     render: bool = True
     success_hold_s: float = 0.5
     place_tol_m: float = 0.012
@@ -97,6 +102,9 @@ class DynamicStackEnv:
         self.belt_adr = m.joint("belt_slide").qposadr[0]
         self.belt_act = m.actuator("belt_drive").id
         self.boxes = {n: self._box_info(n) for n in ("src", "tgt", "dist")}
+        self.rand = DomainRandomizer(m)
+        self.half = {"src": SRC_HALF, "tgt": TGT_HALF, "dist": TGT_HALF}
+        self.belt_dir = np.array([0.0, 1.0])
         self.renderer = mujoco.Renderer(m, self.cfg.img_size, self.cfg.img_size) if self.cfg.render else None
         self.home_q = self._solve_home()
         self.reset(seed=self.cfg.seed)
@@ -167,7 +175,13 @@ class DynamicStackEnv:
         return float(self.model.geom_size[self.boxes[name]["geom"]][0])
 
     def belt_velocity(self):
+        """Signed belt speed along the belt direction (m/s)."""
         return float(self.data.qvel[self.model.joint("belt_slide").dofadr[0]])
+
+    def belt_to_world(self, u, s):
+        """Belt-frame coords (u across, s along the belt) -> world xy."""
+        c, sn = math.cos(self.belt_yaw), math.sin(self.belt_yaw)
+        return np.array([self.belt_x + u * c - s * sn, u * sn + s * c])
 
     # ------------------------------------------------------------------ reset
     def reset(self, seed=None, options=None):
@@ -190,44 +204,60 @@ class DynamicStackEnv:
                     cfg.belt_speed_range[1] * 1.3,
                 )
             )
+        # --- domain randomisation (conveyor pose, cameras, appearance, object sizes)
+        dr, k = self.rand, cfg.dr_scale
+        self.belt_x, self.belt_yaw = dr.conveyor(r, k, cfg.randomize_conveyor)
+        self.belt_dir = np.array([-math.sin(self.belt_yaw), math.cos(self.belt_yaw)])
+        dr.cameras(r, k, cfg.randomize_camera)
+        dr.appearance(r, k, cfg.randomize_appearance)
         names = list(PALETTE)
         if cfg.randomize_colors:
             src_c, tgt_c, dist_c = r.choice(len(names), 3, replace=False)
         else:
             src_c, tgt_c, dist_c = 0, 2, 1
         self.src_color, self.tgt_color, self.dist_color = names[src_c], names[tgt_c], names[dist_c]
+        if cfg.randomize_appearance:
+            self.half = {
+                "src": float(np.clip(SRC_HALF + r.uniform(-0.004, 0.006) * k, 0.044, 0.060)),
+                "tgt": float(np.clip(TGT_HALF + r.uniform(-0.005, 0.010) * k, 0.052, 0.075)),
+            }
+            self.half["dist"] = float(np.clip(TGT_HALF + r.uniform(-0.01, 0.01) * k, 0.05, 0.075))
+        else:
+            self.half = {"src": SRC_HALF, "tgt": TGT_HALF, "dist": TGT_HALF}
+        base_mass = {"src": r.uniform(0.15, 0.35) if cfg.randomize_physics else 0.2, "tgt": 0.5, "dist": 0.5}
         for n, c in (("src", self.src_color), ("tgt", self.tgt_color), ("dist", self.dist_color)):
-            m.geom_rgba[self.boxes[n]["geom"]] = (*PALETTE[c], 1.0)
+            b = self.boxes[n]
+            rgb = dr.jitter_color(r, PALETTE[c], k) if cfg.randomize_appearance else PALETTE[c]
+            m.geom_rgba[b["geom"]] = (*rgb, 1.0)
+            m.body_mass[b["body"]] = base_mass[n]
+            dr.resize_box(b["geom"], b["body"], self.half[n])
         if cfg.randomize_physics:
             m.geom_friction[self.boxes["src"]["geom"], 0] = r.uniform(0.7, 1.2)
             m.geom_friction[self.boxes["tgt"]["geom"], 0] = r.uniform(0.7, 1.2)
-            m.body_mass[self.boxes["src"]["body"]] = r.uniform(0.15, 0.35)
         self.instruction = (
             f"stack the {self.src_color} block on the {self.tgt_color} box moving on the conveyor"
         )
 
-        # source block on the table (right of the belt, reachable), random heading
+        # source block on the table (beside the belt), random heading. Keep it clear of the (rotated) rail.
         self.src_yaw = float(r.uniform(-0.5, 0.5))
-        sx, sy = r.uniform(0.24, 0.31), r.uniform(0.18, 0.38)
-        self._set_box("src", (sx, sy, SRC_HALF + 0.0005), self.src_yaw)
-        # target + distractor on the belt, upstream (negative y)
-        # start further upstream on fast belts so the target is still reachable after the pick
-        ty = float(opts.get("target_y", r.uniform(-0.55, -0.35) - 4.0 * max(0.0, self.belt_speed - 0.05)))
-        tx = BELT_X + r.uniform(-0.03, 0.03)
-        self._set_box("tgt", (tx, ty, BELT_TOP + TGT_HALF + 0.0005), r.uniform(-0.15, 0.15))
+        sy = r.uniform(0.18, 0.38)
+        rail_x = self.belt_to_world(-0.178, 0.0)[0] + sy * math.tan(self.belt_yaw)  # outer rail edge at y=sy
+        sx = min(r.uniform(0.24, 0.31), rail_x - self.half["src"] - 0.04)
+        self._set_box("src", (sx, sy, self.half["src"] + 0.0005), self.src_yaw)
+        # target + distractor on the belt, upstream; start further upstream on fast belts so the
+        # target is still reachable after the pick
+        ts = float(opts.get("target_y", r.uniform(-0.55, -0.35) - 4.0 * max(0.0, self.belt_speed - 0.05)))
+        self.tgt_yaw = float(self.belt_yaw + r.uniform(-0.15, 0.15))
+        xy = self.belt_to_world(r.uniform(-0.03, 0.03), ts)
+        self._set_box("tgt", (*xy, BELT_TOP + self.half["tgt"] + 0.0005), self.tgt_yaw)
         if cfg.n_distractors > 0:
             side = r.choice([-1.0, 1.0])
+            xy = self.belt_to_world(r.uniform(-0.03, 0.03), ts + side * r.uniform(0.27, 0.34))
             self._set_box(
-                "dist",
-                (
-                    BELT_X + r.uniform(-0.03, 0.03),
-                    ty + side * r.uniform(0.25, 0.32),
-                    BELT_TOP + TGT_HALF + 0.0005,
-                ),
-                r.uniform(-0.15, 0.15),
+                "dist", (*xy, BELT_TOP + self.half["dist"] + 0.0005), self.belt_yaw + r.uniform(-0.15, 0.15)
             )
         else:
-            self._set_box("dist", (0.2, -0.6, TGT_HALF + 0.0005), 0.0)
+            self._set_box("dist", (0.2, -0.6, self.half["dist"] + 0.0005), 0.0)
 
         # robot at home, commanded pose = home pose
         d.qpos[self.arm_qadr] = self.home_q
@@ -389,7 +419,7 @@ class DynamicStackEnv:
         sp, _ = self.box_pose("src")
         tp, _ = self.box_pose("tgt")
         off = float(np.linalg.norm(sp[:2] - tp[:2]))
-        above = sp[2] - tp[2] > 0.5 * (SRC_HALF + TGT_HALF)
+        above = sp[2] - tp[2] > 0.5 * (self.half["src"] + self.half["tgt"])
         return bool(touching and above), off
 
     def _check_done(self):
@@ -403,7 +433,12 @@ class DynamicStackEnv:
             sp[2] < -0.05
             or tp[2] < BELT_TOP - 0.02
             or abs(tp[1]) > 1.1
-            or (self._released_once and self.held is None and not supported and sp[2] < SRC_HALF + 0.01)
+            or (
+                self._released_once
+                and self.held is None
+                and not supported
+                and sp[2] < self.half["src"] + 0.01
+            )
         )
         truncated = self.t >= self.cfg.max_time_s
         return bool(success or failed), bool(truncated and not (success or failed)), bool(success)
@@ -444,7 +479,11 @@ class DynamicStackEnv:
                 "tgt_pos": tp,
                 "dist_pos": dp,
                 "src_yaw": self.src_yaw,
-                "belt_vel": np.array([0.0, self.belt_velocity()]),
+                "belt_vel": self.belt_dir * self.belt_velocity(),
+                "belt_dir": self.belt_dir.copy(),
+                "src_half": self.half["src"],
+                "tgt_half": self.half["tgt"],
+                "tgt_yaw": self.tgt_yaw,
                 "belt_cmd": float(self.data.ctrl[self.belt_act]),
                 "held": self.held,
                 "stack_supported": supported,

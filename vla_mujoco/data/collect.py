@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--speed-change", action="store_true")
     ap.add_argument("--occlusion-s", type=float, default=0.0)
     ap.add_argument("--distractors", type=int, default=1)
+    ap.add_argument("--dr-scale", type=float, default=1.0, help="domain-randomisation range multiplier")
+    ap.add_argument("--no-dr", action="store_true", help="disable conveyor/camera/appearance randomisation")
     a = ap.parse_args()
     cfg = dict(
         img_size=a.img_size,
@@ -77,6 +79,10 @@ def main():
         speed_change=a.speed_change,
         occlusion_s=a.occlusion_s,
         n_distractors=a.distractors,
+        dr_scale=a.dr_scale,
+        randomize_conveyor=not a.no_dr,
+        randomize_camera=not a.no_dr,
+        randomize_appearance=not a.no_dr,
     )
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

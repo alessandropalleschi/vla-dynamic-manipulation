@@ -182,7 +182,7 @@ def build_mjcf(img_size: int = 128) -> str:
   </asset>
   <default>
     <default class="arm"><geom contype="1" conaffinity="2" rgba="0.88 0.88 0.9 1"/></default>
-    <default class="toolcol"><geom contype="1" conaffinity="2" rgba="0.25 0.27 0.3 1"/></default>
+    <default class="toolcol"><geom contype="1" conaffinity="2" group="3" rgba="0.25 0.27 0.3 1"/></default>
     <default class="toolvis"><geom contype="0" conaffinity="0" group="1" mass="0"/></default>
     <default class="obj"><geom contype="2" conaffinity="3" condim="3"/></default>
   </default>

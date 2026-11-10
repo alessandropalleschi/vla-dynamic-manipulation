@@ -16,7 +16,6 @@ from __future__ import annotations
 import numpy as np
 
 from .sim.env import MAX_STEP_M, MAX_STEP_YAW, RELEASE_TIME_S, DynamicStackEnv
-from .sim.scene import SRC_HALF, TGT_HALF
 
 HOVER_Z = 0.36
 PLACE_GAP = 0.004  # block bottom above target top at release (m)
@@ -64,10 +63,12 @@ class StackExpert:
         self.phase_t += env.dt
         vac = 0.0
         src, tgt = P["src_pos"], P["tgt_pos"]
-        v = np.array([0.0, P["belt_vel"][1], 0.0])
+        v = np.array([P["belt_vel"][0], P["belt_vel"][1], 0.0])
         yaw_src = _wrap_quarter(P["src_yaw"])
-        held_h = 2 * SRC_HALF  # block bottom is this far below the TCP
-        tcp_to_src_top = np.array([src[0], src[1], src[2] + SRC_HALF])
+        src_h, tgt_h = P["src_half"], P["tgt_half"]
+        yaw_tgt = _wrap_quarter(P["tgt_yaw"])  # align the held block with the target box
+        held_h = 2 * src_h  # block bottom is this far below the TCP
+        tcp_to_src_top = np.array([src[0], src[1], src[2] + src_h])
 
         if self.phase == "approach":
             goal = tcp_to_src_top + [0, 0, 0.10]
@@ -86,25 +87,25 @@ class StackExpert:
         elif self.phase == "lift":
             vac = 1.0
             goal = np.array([env.ee_cmd[0], env.ee_cmd[1], HOVER_Z])
-            a, dyaw = self._move(goal, 0.35, 0.0)
+            a, dyaw = self._move(goal, 0.35, yaw_tgt)
             if abs(env.ee_cmd[2] - HOVER_Z) < 3e-3:
                 self._enter("transfer")
         elif self.phase == "transfer":
             vac = 1.0
             # constant-velocity intercept: where will the target be when we arrive?
-            top = np.array([tgt[0], tgt[1], tgt[2] + TGT_HALF + held_h + 0.08])
+            top = np.array([tgt[0], tgt[1], tgt[2] + tgt_h + held_h + 0.08])
             t_arr = 0.0
             for _ in range(6):
-                goal = np.array([tgt[0], tgt[1] + v[1] * t_arr, HOVER_Z])
+                goal = np.array([tgt[0] + v[0] * t_arr, tgt[1] + v[1] * t_arr, HOVER_Z])
                 t_arr = np.linalg.norm(goal - env.ee_cmd) / 0.35
             goal[2] = HOVER_Z
-            a, dyaw = self._move(goal, 0.35, 0.0)
+            a, dyaw = self._move(goal, 0.35, yaw_tgt)
             if np.linalg.norm((env.ee_cmd - goal)[:2]) < 6e-3:
                 self._enter("track")
             _ = top
         elif self.phase == "track":
             vac = 1.0
-            place_z = tgt[2] + TGT_HALF + held_h + PLACE_GAP
+            place_z = tgt[2] + tgt_h + held_h + PLACE_GAP
             # closed-loop xy tracking with belt feed-forward; descend only when aligned
             lookahead = 2.0 * env.dt
             xy_goal = tgt[:2] + v[:2] * lookahead
@@ -115,22 +116,22 @@ class StackExpert:
             if env.ee_cmd[2] <= place_z + 1e-4:
                 dz = place_z - env.ee_cmd[2]
             goal = np.array([xy_goal[0], xy_goal[1], env.ee_cmd[2] + dz])
-            a, dyaw = self._move(goal, 0.6, 0.0)
+            a, dyaw = self._move(goal, 0.6, yaw_tgt)
             gap = env.ee_cmd[2] - place_z
             # command release RELEASE_TIME_S early so the block lets go right at place_z
             if descend_ok and gap < abs(vz) * RELEASE_TIME_S + 0.002:
                 self._enter("release")
         elif self.phase == "release":
-            place_z = tgt[2] + TGT_HALF + held_h + PLACE_GAP
+            place_z = tgt[2] + tgt_h + held_h + PLACE_GAP
             xy_goal = tgt[:2] + v[:2] * 2.0 * env.dt
             goal = np.array([xy_goal[0], xy_goal[1], max(place_z, env.ee_cmd[2] - 0.0)])
-            a, dyaw = self._move(goal, 0.6, 0.0)
+            a, dyaw = self._move(goal, 0.6, yaw_tgt)
             vac = 0.0
             if P["held"] is None and self.phase_t > 0.1:
                 self._enter("retreat")
         else:  # retreat
             goal = np.array([env.ee_cmd[0], env.ee_cmd[1], HOVER_Z])
-            a, dyaw = self._move(goal, 0.25, 0.0)
+            a, dyaw = self._move(goal, 0.25, yaw_tgt)
             vac = 0.0
         act = np.array([a[0], a[1], a[2], dyaw, vac], dtype=np.float32)
         if self.noise > 0:

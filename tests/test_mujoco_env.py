@@ -69,3 +69,44 @@ def test_reset_is_deterministic():
     ia, ib = a.reset(seed=11)[1], b.reset(seed=11)[1]
     assert np.allclose(ia["priv"]["tgt_pos"], ib["priv"]["tgt_pos"])
     assert a.instruction == b.instruction
+
+
+def test_conveyor_randomisation_keeps_geometry_consistent():
+    env = make(seed=4)
+    yaws = set()
+    for s in range(6):
+        env.reset(seed=s)
+        yaws.add(round(env.belt_yaw, 3))
+        m, d = env.model, env.data
+        # rails stay parallel to the belt slab (guards against stale geom_sameframe shortcuts)
+        belt_y = d.geom_xmat[m.geom("belt_top").id].reshape(3, 3)[:, 1]
+        for rail in ("rail_l", "rail_r", "belt_frame"):
+            assert np.allclose(d.geom_xmat[m.geom(rail).id].reshape(3, 3)[:, 1], belt_y, atol=1e-6)
+        assert np.allclose(env._info()["priv"]["belt_dir"], belt_y[:2], atol=1e-6)
+    assert len(yaws) > 1
+
+
+def test_randomisation_changes_views_and_can_be_disabled():
+    a = make(seed=1)
+    pos_a = [a.reset(seed=s) and a.model.cam_pos[a.model.camera("front").id].copy() for s in range(3)]
+    assert not np.allclose(pos_a[0], pos_a[1])
+    off = make(seed=1, randomize_conveyor=False, randomize_camera=False, randomize_appearance=False)
+    p0 = off.model.cam_pos[off.model.camera("front").id].copy()
+    off.reset(seed=7)
+    assert np.allclose(off.model.cam_pos[off.model.camera("front").id], p0)
+    assert off.belt_yaw == 0.0 and off.half["src"] == 0.05
+
+
+def test_expert_stacks_with_out_of_distribution_randomisation():
+    wins = sum(run_expert(make(seed=s, dr_scale=1.6), s)["success"] for s in range(6))
+    assert wins >= 5
+
+
+def test_box_resize_keeps_inertia_consistent():
+    env = make(seed=2)
+    env.reset(seed=2)
+    m = env.model
+    b = env.boxes["src"]
+    h = env.half["src"]
+    assert np.isclose(m.geom_size[b["geom"]][0], h)
+    assert np.isclose(m.body_inertia[b["body"]][0], m.body_mass[b["body"]] * (2 * h) ** 2 / 6)
