@@ -69,7 +69,8 @@ The learned-policy baseline is a scaffold (no pretrained weights); no benchmark 
 
 Dynamic manipulation and moving-target interception · vision-based tracking · learning from demonstrations ·
 belief-state estimation under occlusion · VLA policies. The planned memory comparison (single-frame vs window vs
-recurrent vs RSSM) is described in [`docs/next_steps.md`](docs/next_steps.md).
+recurrent vs RSSM) is described in [`docs/next_steps.md`](docs/next_steps.md); the multi-object / multi-step task and
+belief-conditioned flow-matching policy design is in [`docs/TASK_AND_POLICY_DESIGN.md`](docs/TASK_AND_POLICY_DESIGN.md).
 
 ## Development
 
