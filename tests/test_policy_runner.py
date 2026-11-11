@@ -31,7 +31,7 @@ def test_forward_loss_and_sampling(kind, head, arch):
     tgt = torch.rand(2, 5, 6, 5)
     tgt[..., :CONT_DIM] = tgt[..., :CONT_DIM] * 2 - 1
     lt = m.loss_terms(z, tgt)
-    at = m.aux_terms(z, torch.randn(2, 5, 4), torch.randint(0, 7, (2, 5)), torch.randint(0, 4, (2, 5)))
+    at = m.aux_terms(z, torch.randn(2, 5, 7), torch.randint(0, 7, (2, 5)), torch.randint(0, 4, (2, 5)))
     sum([*lt.values(), *at.values()]).backward()
     ch = m.sample_chunk(z[:, -1])
     assert ch.shape == (2, 6, 5) and ch[..., :CONT_DIM].abs().max() <= 1 and 0 <= ch[..., CONT_DIM].min()

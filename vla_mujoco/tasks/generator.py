@@ -67,24 +67,40 @@ def _table_layout(env, rng, ents: list[Entity]) -> bool:
     return True
 
 
-def _belt_layout(env, rng, ents: list[Entity]) -> None:
-    """Items in arrival order (index 0 = most downstream) with random gaps; first item compensated for speed."""
+def _window(env, role: str) -> tuple[float, float]:
+    """Initial belt coordinates s at which an object can still fulfil ``role`` (depends on the belt speed)."""
     v = env.belt_speed
-    s = float(rng.uniform(-0.55, -0.35) - 4.0 * max(0.0, v - 0.05))
-    prev = None
-    for e in ents:
-        if prev is not None:
-            s -= prev.footprint + e.footprint + 0.10 + float(rng.uniform(0.0, 0.14))
+    lo, hi = {
+        "support": (-0.2 - T_SUPPORT * v, 0.45 - 9.0 * v),  # arrives in time and is not gone before we get there
+        "tower_support": (-0.25 - 8.0 * v, 0.40 - 17.0 * v),  # two sequential placements: stays in reach ~17 s
+        "pick": (-0.25 - T_PICK * v, 0.35 - T_PICK * v),
+    }[role]
+    return max(lo, -1.0), min(hi, 0.15)
+
+
+def _belt_layout(env, rng, ents: list[Entity], windows: dict[str, tuple[float, float]]) -> bool:
+    """Random, non-overlapping belt positions. Role objects are placed first inside their feasible window and
+    bystanders anywhere on either side of them, so an object's *rank* on the belt does not reveal its role
+    (otherwise the instruction would be redundant and a policy could ignore the language)."""
+    placed: list[Entity] = []
+    order = sorted(ents, key=lambda e: e.name not in windows)  # roles first
+    for e in order:
+        lo, hi = windows.get(e.name, (-1.0, 0.1))
+        if lo > hi:
+            return False
+        for _ in range(120):
+            s = float(rng.uniform(lo, hi))
+            if all(abs(s - o.belt_s) >= e.footprint + o.footprint + 0.10 for o in placed):
+                break
+        else:
+            return False
         u = float(rng.uniform(-0.03, 0.03))
         e.belt_s = s
         xy = env.belt_to_world(u, s)
         e.pos = np.array([xy[0], xy[1], BELT_TOP + e.hz + 0.0005])
         e.yaw = float(env.belt_yaw + rng.uniform(-0.15, 0.15))
-        prev = e
-
-
-def _eligible(env, e: Entity, horizon: float, lo: float, hi: float) -> bool:
-    return lo <= e.belt_s + env.belt_speed * horizon <= hi
+        placed.append(e)
+    return True
 
 
 def _build(env, rng, kind, cfg):
@@ -103,50 +119,25 @@ def _build(env, rng, kind, cfg):
     colors = _colors(rng, nb + nt)
     belt = [_make(rng, cfg, i, colors[i], "belt") for i in range(nb)]
     table = [_make(rng, cfg, nb + i, colors[nb + i], "table") for i in range(nt)]
-    _belt_layout(env, rng, belt)
-    belt = [e for e in belt if e.belt_s > -1.05]  # items past the upstream end of the belt would fall off
-    if len(belt) < need_b:
-        return None
-    if not _table_layout(env, rng, table):
-        return None
 
-    def support_ok(e):  # arrives in time and is not gone before we get there
-        return _eligible(env, e, T_SUPPORT, -0.2, 10.0) and _eligible(env, e, 9.0, -10.0, 0.45)
-
-    def pick_ok(e):
-        return _eligible(env, e, T_PICK, -0.25, 0.35)
-
+    # roles first (uniformly at random), then positions that make them feasible
+    bi = rng.permutation(len(belt))
+    ti = rng.permutation(len(table)) if table else []
     if kind == "stack":
-        ys = [e for e in belt if support_ok(e)]
-        if not ys:
-            return None
-        x, y = table[rng.integers(len(table))], ys[rng.integers(len(ys))]
-        order = [(x, y)]
+        x, y = table[ti[0]], belt[bi[0]]
+        windows, order = {y.name: _window(env, "support")}, [(x, y)]
     elif kind == "belt_to_table":
-        xs = [e for e in belt if pick_ok(e)]
-        if not xs:
-            return None
-        x, y = xs[rng.integers(len(xs))], table[rng.integers(len(table))]
-        order = [(x, y)]
+        x, y = belt[bi[0]], table[ti[0]]
+        windows, order = {x.name: _window(env, "pick")}, [(x, y)]
     elif kind == "belt_to_belt":
-        xs = [e for e in belt if pick_ok(e)]
-        if not xs:
-            return None
-        x = xs[rng.integers(len(xs))]
-        ys = [e for e in belt if e is not x and support_ok(e)]
-        if not ys:
-            return None
-        y = ys[rng.integers(len(ys))]
-        order = [(x, y)]
-    else:  # tower
-        # two sequential placements: the support must arrive in time AND stay in reach for ~17 s
-        ys = [e for e in belt if _eligible(env, e, 8.0, -0.25, 10.0) and _eligible(env, e, 17.0, -10.0, 0.40)]
-        if not ys or len(table) < 2:
-            return None
-        y = ys[rng.integers(len(ys))]
-        i = rng.permutation(len(table))[:2]
-        x, z = table[i[0]], table[i[1]]
-        order = [(x, y), (z, x)]
+        x, y = belt[bi[0]], belt[bi[1]]
+        windows, order = {x.name: _window(env, "pick"), y.name: _window(env, "support")}, [(x, y)]
+    else:  # tower: x onto belt object y, then z onto x
+        y = belt[bi[0]]
+        x, z = table[ti[0]], table[ti[1]]
+        windows, order = {y.name: _window(env, "tower_support")}, [(x, y), (z, x)]
+    if not _belt_layout(env, rng, belt, windows) or not _table_layout(env, rng, table):
+        return None
     return belt + table, order
 
 

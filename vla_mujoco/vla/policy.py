@@ -28,7 +28,7 @@ from .text import MAX_TOKENS, VOCAB_SIZE, TextBackend, TextConfig, hash_tokens
 ACT_DIM = 5  # [vx, vy, vz, wz, vacuum]
 CONT_DIM = 4  # continuous part (flow / regression); vacuum is a separate Bernoulli head
 N_PHASES, N_STEPS = 7, 4
-AUX_DIM = 4  # target position relative to the tool (xyz) + target speed along the belt
+AUX_DIM = 7  # pick object relative to the tool (xyz), support relative to the tool (xyz), support speed along belt
 
 
 def tokenize(text: str, max_len: int = MAX_TOKENS) -> torch.Tensor:  # backwards-compatible helper

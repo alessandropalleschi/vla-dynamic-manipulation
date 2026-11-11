@@ -32,8 +32,9 @@ def load_data(path, cameras, max_eps=None):
     eps = []
     for f in sorted(Path(path).glob("ep_*.npz"))[:max_eps]:
         z = np.load(f)
-        pos, tcp = z["tgt_pos"], z["proprio"][:, 12:15]
-        aux = np.concatenate([pos - tcp, z["tgt_vel_y"][:, None]], 1).astype(np.float32)
+        tcp = z["proprio"][:, 12:15]
+        # referring-expression supervision: where are the pick object and the support the instruction names?
+        aux = np.concatenate([z["src_pos"] - tcp, z["tgt_pos"] - tcp, z["tgt_vel_y"][:, None]], 1).astype(np.float32)
         T = len(z["action"])
         eps.append(
             dict(
@@ -196,7 +197,7 @@ def main():
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--ema", type=float, default=0.999)
-    ap.add_argument("--aux-w", type=float, default=0.5)
+    ap.add_argument("--aux-w", type=float, default=1.0)
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--val-every", type=int, default=250)
     ap.add_argument("--val-batches", type=int, default=8)
