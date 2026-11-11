@@ -8,7 +8,7 @@ PY="${PYTHON:-python3}"
 # a bind-mounted repo is owned by another uid inside the container, which makes git refuse to operate on it
 git config --global --add safe.directory "$PWD" 2>/dev/null || true
 
-git lfs install --local                       # LFS filter + hooks for this repo (meshes are LFS-tracked)
+git lfs install --local --force                     # LFS filter + hooks for this repo (meshes are LFS-tracked)
 "$PY" -m pre_commit install --install-hooks   # also pre-fetches the hook environments, so commits work offline
 
 hook="$(git rev-parse --git-path hooks/pre-commit)"

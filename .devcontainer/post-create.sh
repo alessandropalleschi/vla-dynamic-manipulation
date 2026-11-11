@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python -m pip install --upgrade pip
-git lfs install --local && git lfs pull || echo "(git lfs pull failed: meshes may be pointer files; see README)"
+git lfs install --local --force && git lfs pull || echo "(git lfs pull failed: meshes may be pointer files; see README)"
 
 # NVIDIA's EGL vendor ICD: the container toolkit normally installs it when the `graphics` capability is
 # requested; create it if the driver library is present but the ICD file is not.
@@ -14,8 +14,14 @@ if [ "${TORCH_VARIANT:-cpu}" = "cuda" ]; then
     echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libEGL_nvidia.so.0"}}' \
       | sudo tee /usr/share/glvnd/egl_vendor.d/10_nvidia.json >/dev/null
   fi
-  # The default Linux torch wheel on PyPI is a CUDA build (bundles the CUDA runtime; only the host driver is needed).
-  python -m pip install torch
+  # The default PyPI torch wheel targets the newest CUDA (13.x) and fails with "driver too old" on CUDA-12 hosts.
+  # Pick the wheel from the CUDA version the host driver reports (CUDA 12.x minor-version compatibility lets the
+  # cu126 wheel run on any 12.x driver >= 525).
+  CUDA_VER=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9]*\)\..*/\1/p' | head -1)
+  case "${CUDA_VER:-}" in
+    12) python -m pip install torch --index-url https://download.pytorch.org/whl/cu126 ;;
+    *)  python -m pip install torch ;;   # CUDA 13+ driver, or no driver visible at build time
+  esac
 else
   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 fi
