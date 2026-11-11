@@ -220,6 +220,7 @@ def main():
     ap.add_argument("--device", default="auto", help="auto | cpu | cuda | cuda:N")
     ap.add_argument("--amp", action="store_true", help="bfloat16 autocast on CUDA")
     ap.add_argument("--resume", action="store_true", help="continue from <out>/last.pt")
+    ap.add_argument("--init", help="initialise matching weights from a checkpoint (e.g. grounding pre-training)")
     a = ap.parse_args()
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -254,6 +255,11 @@ def main():
     model = VLAPolicy(a.cameras, arch=a.arch, chunk=a.chunk, head=a.head, flow_steps=a.flow_steps, text=backend.cfg).to(
         dev
     )
+    if a.init:
+        sd, own = torch.load(a.init, map_location=dev)["model"], model.state_dict()
+        keep = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape and not k.startswith("p_")}
+        model.load_state_dict(keep, strict=False)
+        print(f"initialised {len(keep)}/{len(own)} tensors from {a.init}")
     allp = np.concatenate([e["proprio"] for e in eps])
     model.p_mean.copy_(torch.from_numpy(allp.mean(0)))
     model.p_std.copy_(torch.from_numpy(allp.std(0) + 1e-3))
