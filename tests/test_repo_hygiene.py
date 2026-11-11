@@ -19,8 +19,8 @@ def test_every_devcontainer_profile_installs_the_hooks(profile):
     assert "post-create.sh" in cfg["postCreateCommand"]
     post = read(".devcontainer/post-create.sh")
     assert "install-hooks.sh" in post
-    # the hooks are installed after the dev extra (which provides pre-commit) and before the slow checks
-    assert post.index('pip install -e ".[dev]"') < post.index("install-hooks.sh") < post.index("pytest")
+    # the hooks are installed after the train+dev extras (the dev extra provides pre-commit)
+    assert post.index('pip install -e ".[train,dev]"') < post.index("install-hooks.sh")
 
 
 def test_install_hooks_script_installs_and_verifies():
@@ -45,7 +45,15 @@ def test_precommit_config_blocks_large_files_and_artifacts():
     assert maxkb <= 1000
     guard = hooks["no-artifacts"]
     pattern = re.compile(guard["files"])
-    for bad in ("runs4/x.txt", "runs/a/b.log", "data/ep.npz", "model.pt", "x/ckpt.safetensors", "demo.mp4"):
+    for bad in (
+        "runs4/x.txt",
+        "runs/a/b.log",
+        "data/ep.npz",
+        "data_oak/manifest.json",
+        "model.pt",
+        "x/ckpt.safetensors",
+        "demo.mp4",
+    ):
         assert pattern.search(bad), bad
     for ok in ("vla_mujoco/data/collect.py", "vla_mujoco/vla/train.py", "docs/MUJOCO.md", "tests/test_repo_hygiene.py"):
         assert not pattern.search(ok), ok  # source code under a `data` package must stay committable
@@ -57,6 +65,7 @@ def test_meshes_are_lfs_tracked_and_ignored_outputs_cover_all_run_dirs():
         assert re.search(rf"^\*\.{ext} filter=lfs", attrs, re.M), ext
     assert re.search(r"^runs\*/$", read(".gitignore"), re.M)
     assert re.search(r"^data/\*$", read(".gitignore"), re.M)
+    assert re.search(r"^/data_\*/$", read(".gitignore"), re.M)
 
 
 def test_dockerfile_drops_the_expired_yarn_apt_source_before_updating():
@@ -74,8 +83,10 @@ def test_devcontainer_has_claude_codex_extension_features_and_persistent_state(p
     assert any(f.startswith("ghcr.io/devcontainers/features/node") for f in cfg["features"])  # npm for the CLIs
     assert cfg["initializeCommand"] == "bash .devcontainer/init-host.sh"  # runs on the host before the mounts
     targets = {m.split("target=")[1].split(",")[0]: m for m in cfg["mounts"]}
-    assert set(targets) == {"/home/vscode/.claude", "/home/vscode/.claude.json", "/home/vscode/.codex"}
-    assert all("${localEnv:HOME}" in m and "VLA_DEV_PROFILE" in m and "type=bind" in m for m in targets.values())
+    state = {"/home/vscode/.claude", "/home/vscode/.claude.json", "/home/vscode/.codex"}
+    assert state <= set(targets)  # other mounts (cache volumes) may coexist
+    assert all("${localEnv:HOME}" in targets[t] and "VLA_DEV_PROFILE" in targets[t] for t in state)
+    assert all("type=bind" in targets[t] for t in state)
     assert cfg["remoteUser"] == "vscode"  # the mount targets live in this user's home
 
 
@@ -109,3 +120,27 @@ def test_init_host_script_creates_private_persistent_state_without_clobbering(tm
     js.mkdir()
     bad = run()
     assert bad.returncode == 1 and "is a directory" in bad.stderr
+
+
+def test_devcontainer_json_has_no_duplicate_keys_and_keeps_all_mounts():
+    """A duplicated key (e.g. two "mounts") is legal JSON but silently drops one of them; guard against it."""
+
+    def no_dupes(pairs):
+        keys = [k for k, _ in pairs]
+        assert len(keys) == len(set(keys)), f"duplicate keys: {sorted({k for k in keys if keys.count(k) > 1})}"
+        return dict(pairs)
+
+    for profile in ("gpu", "cpu"):
+        cfg = json.loads(read(f".devcontainer/{profile}/devcontainer.json"), object_pairs_hook=no_dupes)
+        targets = {m.split("target=")[1].split(",")[0] for m in cfg["mounts"]}
+        assert {"/home/vscode/.claude", "/home/vscode/.claude.json", "/home/vscode/.codex"} <= targets
+        assert {"/home/vscode/.cache/pip", "/home/vscode/.cache/pre-commit"} <= targets  # cache volumes
+
+
+def test_training_dependencies_are_declared():
+    """The default text encoder needs transformers; it was once installed by hand and missing in a fresh container."""
+    import tomllib
+
+    train = tomllib.loads(read("pyproject.toml"))["project"]["optional-dependencies"]["train"]
+    assert {"torch", "transformers"} <= {d.split("[")[0].split(">")[0].split("=")[0].strip() for d in train}
+    assert '".[train,dev]"' in read(".devcontainer/post-create.sh")

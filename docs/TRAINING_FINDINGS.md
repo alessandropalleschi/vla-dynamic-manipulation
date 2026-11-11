@@ -98,3 +98,31 @@ moved, so only the text says which object is meant); gap = wrong-text error minu
    motion). Teacher-forced action loss is dominated by frames where the proprioceptive velocity already reveals the goal.
 3. **More data and steps on the GPU** (`make train`), larger images, and a pretrained vision backbone.
 4. Re-run the probes above (`lang_gap` is logged during training) and only then compare encoders and heads.
+
+## GPU baseline before the OAK camera experiment
+
+The earlier “not tested” notes above describe the small CPU experiments. Subsequent GPU work used 50,000 static
+scenes at 128 px (16x16 grounding grid), then 589 demonstrations, a GRU belief, flow action head, grounded slots,
+and frozen pretrained MiniLM text. Static-scene grounding accuracy was 0.713 with the correct instruction versus
+0.248 with another scene's instruction (location prior 0.019).
+
+The held-out action probe used 59 episodes and four wrong instructions per episode. Its decision-frame action-error
+increase with wrong text was +0.0798 (episode-bootstrap 95% CI [0.0619, 0.0982]) with decision weight 1, and +0.0833
+[0.0680, 0.0992] with weight 5 (`runs/probe_w1.json`, `runs/probe_w5.json`, local ignored artifacts). Both policies
+use language under teacher forcing; these results do not establish a benefit from decision weighting.
+
+Closed-loop evaluations failed: both policies achieved 0/30 complete tasks, including with replanning every step;
+the chunk-of-four evaluation picked an object in 1/30 and 0/30 episodes respectively. For 0/30 successes, the
+Wilson 95% interval is [0%, 11.4%]. In a separate easy-scene diagnostic recorded in the handoff, 19/20 episodes
+never reached valid seal geometry, with median closest approach 5.3 cm. No episode reached valid geometry only too
+briefly. This points toward positioning accuracy, though this diagnostic has not yet been reproduced here.
+
+Five DAgger rounds (60 relabelled episodes each, 2,500 training steps per round) on `s0_static_pick` did not pass
+the 60% gate. The initial policy and all five round checkpoints scored 0/20 on the stage evaluation (Wilson 95% CI
+[0%, 16.1%] for each evaluation); pick rates ranged from 0% to 10% (`runs/dagger_s0/log.jsonl`). These repeated
+checks must not be pooled as independent episodes. The handoff also reports a separate round-2 diagnostic with
+median closest approach 2.4 cm and 1/12 complete tasks; that diagnostic is not the stage evaluation.
+
+The next experiment regenerates scenes and demos with the OAK wrist mount and front-facing overhead camera,
+using front, wrist and overhead RGB at 128 px. Its closed-loop performance is not yet known. The old datasets and
+checkpoints remain available for comparison.

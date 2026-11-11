@@ -21,6 +21,10 @@ def main():
     ap.add_argument("--expert", action="store_true")
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--seed0", type=int, default=10_000)
+    ap.add_argument("--wrist-mount", choices=["legacy", "oak"], default=None,
+                    help="default: what the policy was trained on (legacy for --expert)")  # fmt: skip
+    ap.add_argument("--overhead-view", choices=["top", "front"], default=None,
+                    help="default: what the policy was trained on (top for --expert)")  # fmt: skip
     ap.add_argument("--img-size", type=int, default=None, help="default: the size the policy was trained on")
     ap.add_argument("--render-hw", type=int, nargs=2, default=None, metavar=("H", "W"))
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
@@ -48,6 +52,9 @@ def main():
         env_cfg = ck.get("env_cfg") or {}
         a.img_size = a.img_size or env_cfg.get("img_size")
         a.render_hw = a.render_hw or env_cfg.get("render_hw")
+        # a policy is evaluated on the hardware it was trained on, unless a flag explicitly overrides it
+        a.wrist_mount = a.wrist_mount or env_cfg.get("wrist_mount")
+        a.overhead_view = a.overhead_view or env_cfg.get("overhead_view")
         dev = ("cuda" if torch.cuda.is_available() else "cpu") if a.device == "auto" else a.device
         runner = PolicyRunner(model, device=dev, exec_horizon=a.exec_horizon)  # rebuilds the text backend
     elif not a.expert:
@@ -59,6 +66,8 @@ def main():
             img_size=a.img_size or 96,
             render_hw=tuple(a.render_hw) if a.render_hw else None,
             cameras=cams,
+            wrist_mount=a.wrist_mount or "legacy",
+            overhead_view=a.overhead_view or "top",
             render=runner is not None,
             belt_speed_range=tuple(a.speed_range),
             speed_change=a.speed_change,

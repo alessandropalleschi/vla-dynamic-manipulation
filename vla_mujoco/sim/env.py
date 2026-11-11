@@ -59,6 +59,8 @@ class EnvConfig:
         None  # native render size (H, W), e.g. (480, 640) or (1080, 1920); letterboxed to img_size
     )
     cameras: tuple = ("front", "wrist")
+    wrist_mount: str = "legacy"  # "legacy" camera | "oak": OAK-D Pro on the flange adapter plate (see sim/scene.py)
+    overhead_view: str = "top"  # "top" straight down | "front": beyond the belt, looking back at the robot
     control_hz: float = 20.0
     max_time_s: float = 22.0
     belt_speed_range: tuple = (0.02, 0.07)  # m/s
@@ -114,7 +116,9 @@ class DynamicStackEnv:
     def __init__(self, cfg: EnvConfig | None = None):
         self.cfg = cfg or EnvConfig()
         self.render_hw = tuple(self.cfg.render_hw) if self.cfg.render_hw else (self.cfg.img_size, self.cfg.img_size)
-        self.model = mujoco.MjModel.from_xml_string(build_mjcf(*self.render_hw))
+        self.model = mujoco.MjModel.from_xml_string(
+            build_mjcf(*self.render_hw, self.cfg.wrist_mount, self.cfg.overhead_view)
+        )
         self.data = mujoco.MjData(self.model)
         self._ik = mujoco.MjData(self.model)
         m = self.model

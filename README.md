@@ -70,6 +70,10 @@ docs/       MUJOCO.md (design, limitations), next_steps.md (research plan), lega
   (cube, block, cylinder, slab, disc) on both the table and the moving belt, with bystanders that must not be disturbed.
   Instructions are generated from the scene (category, colour, size, location, order on the belt), e.g.
   *"put the cylinder from the conveyor onto the cylinder on the table"*.
+* **Hardware** — a 15 mm flange adapter closes the gap between the UF850 and the VGC10; optionally (`--wrist-mount oak`)
+  the plate carries one OAK-D Pro wrist camera on an inclined wing, and (`--overhead-view front`) the top camera sits beyond
+  the conveyor looking back at the robot. Defaults keep the original cameras; details and clearance numbers in
+  `docs/MUJOCO.md`.
 * **Observations** — `front` / `wrist` / `overhead` RGB, 22-D proprioception, language instruction. Privileged state is
   confined to `info["priv"]`, so deployed policies never see it.
 * **Actions** — normalised Cartesian velocities `[vx, vy, vz, wz, vacuum]` resolved by IK, independent of the control

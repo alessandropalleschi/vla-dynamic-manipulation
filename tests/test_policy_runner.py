@@ -123,3 +123,30 @@ def test_slots_checkpoint_roundtrip_and_text_dependence():
     za, _ = m.features(imgs, pr, backend.encode([TEXTS[0]]))
     zb, _ = m.features(imgs, pr, backend.encode(["put the blue block onto the red cube"]))
     assert not torch.allclose(za, zb)
+
+
+def test_validation_works_when_features_come_back_in_bfloat16(tmp_path, monkeypatch):
+    """Under --amp the fusion/GRU output is bf16; validation once crashed feeding it to float32 heads (GPU only)."""
+    from vla_mujoco.data import collect
+    from vla_mujoco.vla import train
+
+    data = tmp_path / "d"
+    monkeypatch.setattr(
+        sys, "argv", ["c", *f"--out {data} --episodes 3 --workers 1 --img-size 32 --task stack".split()]
+    )
+    collect.main()
+    eps = train.load_data(data, ["front", "wrist"])
+    backend = TextBackend(TextConfig(kind="bow"))
+    strings = sorted({e["instr"] for e in eps})
+    text = {"strings": strings, "tensors": backend.encode(strings)}
+    model = VLAPolicy(arch="gru", text=backend.cfg, patch=8, slots=True).eval()
+    real = model.features
+
+    def bf16_features(*a, **k):
+        out = real(*a, **k)
+        return (out[0].bfloat16(), *out[1:])
+
+    monkeypatch.setattr(model, "features", bf16_features)
+    batcher = train.Batcher(eps, text, model.chunk, 10, "cpu")
+    v = train.validate(model, batcher, np.random.default_rng(0), 1, 2, 2, amp=False)
+    assert np.isfinite(v["act_l1"]) and "lang_gap_dec" in v

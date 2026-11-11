@@ -162,11 +162,12 @@ class FlowHead(nn.Module):
     def velocity(self, cond, x, t):
         return self.net(torch.cat([cond, x, time_embedding(t)], -1))
 
-    def loss(self, cond, target):  # target (..., out_dim) in [-1, 1]
+    def loss(self, cond, target, weights=None):  # target (..., out_dim) in [-1, 1]; weights (...,) per frame
         t = torch.rand(target.shape[:-1], device=target.device)
         eps = torch.randn_like(target)
         x_t = (1 - t[..., None]) * eps + t[..., None] * target
-        return F.mse_loss(self.velocity(cond, x_t, t), target - eps)
+        per = ((self.velocity(cond, x_t, t) - (target - eps)) ** 2).mean(-1)
+        return per.mean() if weights is None else (per * weights).sum() / weights.sum()
 
     @torch.no_grad()
     def sample(self, cond):
@@ -279,13 +280,17 @@ class VLAPolicy(nn.Module):
         return (z, h, gl) if ground else (z, h)
 
     # ------------------------------------------------------------------- heads
-    def loss_terms(self, z, target):
-        """target (B,T,chunk,5): continuous dims in [-1,1], vacuum in {0,1}."""
+    def loss_terms(self, z, target, weights=None):
+        """target (B,T,chunk,5): continuous dims in [-1,1], vacuum in {0,1}.
+
+        ``weights`` (B,T) re-weights the *action* loss per frame (e.g. up-weighting decision frames); the vacuum
+        loss is left unweighted because its timing is not language-dependent."""
         cont = target[..., :CONT_DIM].flatten(-2)
         if self.head_kind == "flow":
-            act = self.flow.loss(z, cont)
+            act = self.flow.loss(z, cont, weights)
         else:
-            act = F.l1_loss(self.reg(z), cont)
+            per = (self.reg(z) - cont).abs().mean(-1)
+            act = per.mean() if weights is None else (per * weights).sum() / weights.sum()
         vac = F.binary_cross_entropy_with_logits(self.vac(z), target[..., CONT_DIM])
         return {"act": act, "vac": vac}
 
@@ -352,7 +357,8 @@ class PolicyRunner:
         self.h, self.hist, self.text, self.queue, self.replans = None, [], None, [], 0
 
     @torch.no_grad()
-    def act(self, obs) -> np.ndarray:
+    def _belief(self, obs):
+        """Update the belief with one observation; returns the per-step feature z (1, T, hidden)."""
         if self.text is None:
             self.text = {
                 k: (v.to(self.dev) if v is not None else None)
@@ -372,6 +378,19 @@ class PolicyRunner:
             z, _ = self.p.features(imgs, pr, self.text)
         else:
             z, self.h = self.p.features(imgs, pr, self.text, self.h)
+        return z
+
+    def observe(self, obs) -> None:
+        """Feed an observation without acting (someone else - e.g. the expert in DAgger - is driving).
+
+        The belief still sees every frame; any queued chunk is dropped so the next ``act`` re-plans from the
+        state the other controller left the robot in."""
+        self._belief(obs)
+        self.queue = []
+
+    @torch.no_grad()
+    def act(self, obs) -> np.ndarray:
+        z = self._belief(obs)
         if not self.queue:  # re-plan: take the next `exec_horizon` actions of the predicted chunk
             chunk = self.p.sample_chunk(z[:, -1])[0, : self.exec_horizon].float().cpu().numpy()
             self.queue = list(chunk.astype(np.float32))

@@ -25,5 +25,5 @@ repos:
         entry: >-
           Training/data artifacts must not be committed (they belong in the git-ignored runs*/ and data/ folders,
           or in git-lfs / an artifact store). If this file is genuinely source, rename it or adjust .pre-commit-config.yaml.
-        files: '^(runs[^/]*|data)/|\.(pt|pth|ckpt|safetensors|npz|npy|h5|hdf5|mp4|gif)$'
+        files: '^(runs[^/]*|data|data_[^/]*)/|\.(pt|pth|ckpt|safetensors|npz|npy|h5|hdf5|mp4|gif)$'
         exclude: '^(external/|data/\.gitkeep$|data/uf850_hover_plan\.json$)'

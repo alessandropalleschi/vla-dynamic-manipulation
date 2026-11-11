@@ -23,15 +23,17 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from ..data.store import list_episodes, read_episode
+from .decision import decision_mask, split_indices
 from .policy import CONT_DIM, N_PHASES, N_STEPS, VLAPolicy
 from .text import DEFAULT_PRETRAINED, TextBackend, TextConfig
 
 
 # --------------------------------------------------------------------------------------------- data
-def load_data(path, cameras, max_eps=None):
+def load_data(path, cameras, max_eps=None, decision_window=10):
     eps = []
-    for f in sorted(Path(path).glob("ep_*.npz"))[:max_eps]:
-        z = np.load(f)
+    for f in list_episodes(path)[:max_eps]:
+        z = read_episode(f)  # images are memory-mapped (folder format), so the dataset need not fit in RAM
         tcp = z["proprio"][:, 12:15]
         # referring-expression supervision: where are the pick object and the support the instruction names?
         aux = np.concatenate([z["src_pos"] - tcp, z["tgt_pos"] - tcp, z["tgt_vel_y"][:, None]], 1).astype(np.float32)
@@ -48,6 +50,7 @@ def load_data(path, cameras, max_eps=None):
                 if "ref_uv" in z
                 else np.zeros((T, len(cameras), 2, 2), np.float32),
                 ref_vis=z["ref_vis"] if "ref_vis" in z else np.zeros((T, len(cameras), 2), bool),
+                decision=decision_mask(z["phase"], decision_window) if "phase" in z else np.zeros(T, bool),
                 instr=str(z["instruction"]),
                 T=T,
             )
@@ -64,7 +67,7 @@ class Batcher:
 
     def make(self, B, rng):
         imgs = [[] for _ in self.eps[0]["img"]]
-        keys = ("proprio", "aux", "phase", "step", "ref_uv", "ref_vis")
+        keys = ("proprio", "aux", "phase", "step", "ref_uv", "ref_vis", "decision")
         cols = {k: [] for k in keys}
         tgt, tid = [], []
         for _ in range(B):
@@ -87,6 +90,7 @@ class Batcher:
             "step": t(np.stack(cols["step"])),
             "ref_uv": t(np.stack(cols["ref_uv"])).float(),
             "ref_vis": t(np.stack(cols["ref_vis"])),
+            "dec": t(np.stack(cols["decision"])),
             "target": t(np.stack(tgt)).float(),
             "tid": torch.tensor(tid),
         }
@@ -163,6 +167,7 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
         k: []
         for k in ("act_l1", "act_l1_wrong", "vac_acc", "aux", "phase_acc", "step_acc", "ground_acc", "ground_acc_wrong")
     }
+    dsum_r = dsum_w = dn = 0.0  # decision frames are sparse: pool sums instead of averaging per-batch means
     with torch.random.fork_rng():
         torch.manual_seed(1234)
         for _ in range(n_batches):
@@ -172,12 +177,17 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
                 z, _, gl = model.features(b["imgs"], b["proprio"], dev_t, ground=True)
                 zw, _, glw = model.features(b["imgs"], b["proprio"], wrong, ground=True)
+            z, zw = z.float(), zw.float()  # heads run outside autocast: bf16 features would hit float32 weights
             sl = slice(burn_in, None)
             tgt = b["target"][:, sl]
             ch = model.sample_chunk(z[:, sl].float())
             chw = model.sample_chunk(zw[:, sl].float())
             m["act_l1"].append(float((ch[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean()))
             m["act_l1_wrong"].append(float((chw[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean()))
+            dec = b["dec"][:, sl].float()
+            dsum_r += float(((ch[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean((-1, -2)) * dec).sum())
+            dsum_w += float(((chw[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean((-1, -2)) * dec).sum())
+            dn += float(dec.sum())
             m["vac_acc"].append(float(((ch[..., CONT_DIM] > 0.5) == (tgt[..., CONT_DIM] > 0.5)).float().mean()))
             sl_uv, sl_vis = b["ref_uv"][:, sl], b["ref_vis"][:, sl]
             m["ground_acc"].append(float(model.ground_terms([g.float()[:, sl] for g in gl], sl_uv, sl_vis)[1]))
@@ -187,6 +197,8 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
             m["step_acc"].append(float((model.aux_step(z[:, sl]).argmax(-1) == b["step"][:, sl]).float().mean()))
     out = {k: float(np.mean(v)) for k, v in m.items()}
     out["lang_gap"] = out["act_l1_wrong"] - out["act_l1"]
+    out["act_l1_dec"] = dsum_r / dn if dn else float("nan")  # error on decision frames only
+    out["lang_gap_dec"] = (dsum_w - dsum_r) / dn if dn else float("nan")  # ... and the wrong-text gap there
     out["ground_gap"] = out["ground_acc"] - out["ground_acc_wrong"]  # accuracy lost when the text is wrong
     model.train()
     return out
@@ -195,6 +207,7 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", default="data/mj_demos")
+    ap.add_argument("--extra-train", nargs="*", default=[], help="more demo dirs used for training only (e.g. DAgger)")
     ap.add_argument("--out", default="runs/gru")
     ap.add_argument("--arch", choices=["mlp", "stack", "gru"], default="gru")
     ap.add_argument("--head", choices=["regress", "flow"], default="regress")
@@ -218,6 +231,8 @@ def main():
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--ema", type=float, default=0.999)
+    ap.add_argument("--decision-w", type=float, default=1.0, help="action-loss weight on decision frames (1 = off)")
+    ap.add_argument("--decision-window", type=int, default=10, help="steps after each approach/transfer start")
     ap.add_argument("--aux-w", type=float, default=1.0)
     ap.add_argument("--ground-w", type=float, default=1.0, help="weight of the patch-grounding loss (0 = off)")
     ap.add_argument("--val-frac", type=float, default=0.1)
@@ -243,19 +258,20 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     # ---- data + text
-    eps = load_data(a.data, a.cameras, a.max_eps)
+    eps = load_data(a.data, a.cameras, a.max_eps, a.decision_window)
     env_cfg = json.loads((Path(a.data) / "config.json").read_text()) if (Path(a.data) / "config.json").exists() else {}
-    order = np.random.default_rng(0).permutation(len(eps))
-    n_val = max(1, int(round(len(eps) * a.val_frac))) if len(eps) > 4 else 0
-    val_eps = [eps[i] for i in order[:n_val]] or [eps[0]]
-    train_eps = [eps[i] for i in order[n_val:]] or eps
+    tr_i, va_i = split_indices(len(eps), a.val_frac)
+    train_eps, val_eps = [eps[i] for i in tr_i], [eps[i] for i in va_i]
+    extra = [e for d in a.extra_train for e in load_data(d, a.cameras, None, a.decision_window)]
+    train_eps += extra  # train-only: the held-out validation split always comes from --data alone
     backend = TextBackend(TextConfig(kind=a.text_encoder, name=a.text_name))
-    strings = sorted({e["instr"] for e in eps})
+    strings = sorted({e["instr"] for e in [*eps, *extra]})
     enc = backend.encode(strings)
     text = {"strings": strings, "tensors": {k: v for k, v in enc.items()}}
     name = torch.cuda.get_device_name(dev) if dev.startswith("cuda") else "cpu"
     print(
-        f"{len(train_eps)} train / {len(val_eps)} val episodes, {sum(e['T'] for e in train_eps)} frames, "
+        f"{len(train_eps)} train ({len(extra)} extra) / {len(val_eps)} val episodes, "
+        f"{sum(e['T'] for e in train_eps)} frames, "
         f"{len(strings)} unique instructions, text={a.text_encoder}, head={a.head}, arch={a.arch}, "
         f"device {dev} ({name}), amp={amp}"
     )
@@ -283,7 +299,7 @@ def main():
     model.p_std.copy_(torch.from_numpy(allp.std(0) + 1e-3))
     aux_all = np.concatenate([e["aux"] for e in eps])
     aux_mu, aux_sd = aux_all.mean(0), aux_all.std(0) + 1e-4
-    for e in eps:
+    for e in [*eps, *extra]:  # statistics come from --data only, so they stay fixed as extra data grows
         e["aux"] = ((e["aux"] - aux_mu) / aux_sd).astype(np.float32)
     print(f"trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.2f}M")
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
@@ -306,7 +322,8 @@ def main():
     if start == 0:
         log.writerow(
             ["step", "lr", "loss", "act", "vac", "aux", "phase", "step_cls", "val_act_l1", "val_act_l1_wrong",
-             "lang_gap", "val_vac_acc", "val_phase_acc", "val_step_acc", "ground_acc", "ground_acc_wrong", "sec"]
+             "lang_gap", "val_vac_acc", "val_phase_acc", "val_step_acc", "ground_acc", "ground_acc_wrong",
+             "act_l1_dec", "lang_gap_dec", "sec"]
         )  # fmt: skip
     best = float("inf")
     t0 = time.time()
@@ -320,7 +337,8 @@ def main():
             z, _, gl = model.features(augment(b["imgs"]), b["proprio"], txt, ground=True)
         z = z.float()
         sl = slice(a.burn_in, None)
-        lt = model.loss_terms(z[:, sl], b["target"][:, sl])
+        w = 1.0 + (a.decision_w - 1.0) * b["dec"][:, sl].float()
+        lt = model.loss_terms(z[:, sl], b["target"][:, sl], w if a.decision_w != 1.0 else None)
         at = model.aux_terms(z[:, sl], b["aux"][:, sl], b["phase"][:, sl], b["step"][:, sl])
         gl = [g.float()[:, sl] for g in gl]
         g_loss, g_acc = model.ground_terms(gl, b["ref_uv"][:, sl], b["ref_vis"][:, sl])
@@ -354,7 +372,8 @@ def main():
             )  # fmt: skip
             print(
                 f"  [val @ {step}] act_l1 {v['act_l1']:.4f}  wrong-text {v['act_l1_wrong']:.4f}  "
-                f"lang_gap {v['lang_gap']:+.4f}  ground_acc {v['ground_acc']:.3f} "
+                f"lang_gap {v['lang_gap']:+.4f} (decision frames {v['lang_gap_dec']:+.4f})  "
+                f"ground_acc {v['ground_acc']:.3f} "
                 f"(wrong-text {v['ground_acc_wrong']:.3f})  vac_acc {v['vac_acc']:.3f}  phase_acc {v['phase_acc']:.3f}",
                 flush=True,
             )

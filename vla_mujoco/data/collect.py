@@ -20,8 +20,46 @@ import numpy as np
 
 from ..expert import StackExpert
 from ..sim.env import DynamicStackEnv, EnvConfig
+from .store import write_episode, write_manifest
 
 PHASES = ["approach", "descend", "lift", "transfer", "track", "release", "retreat"]
+
+
+class EpisodeRecorder:
+    """Accumulates one episode in the dataset layout (images + proprio + action labels + privileged labels)."""
+
+    KEYS = ["proprio", "action", "tgt_pos", "tgt_vel_y", "src_pos", "occluded", "phase", "step", "ref_uv", "ref_vis"]
+
+    def __init__(self, cameras):
+        self.cameras = tuple(cameras)
+        self.rec = {k: [] for k in self.KEYS}
+        self.imgs = {c: [] for c in self.cameras}
+
+    def add(self, obs, info, action, phase_name):
+        """Record the state ``obs``/``info`` with ``action`` as its label (the expert's action in DAgger)."""
+        P = info["priv"]
+        for c in self.cameras:
+            self.imgs[c].append(obs["images"][c])
+        r = self.rec
+        r["proprio"].append(obs["proprio"])
+        r["action"].append(action)
+        r["tgt_pos"].append(P["tgt_pos"])
+        r["tgt_vel_y"].append(P["tgt_vel"][1])
+        r["src_pos"].append(P["src_pos"])
+        r["occluded"].append(P["occluded"])
+        r["phase"].append(PHASES.index(phase_name))
+        r["step"].append(P["step"])
+        r["ref_uv"].append(P["ref_uv"])
+        r["ref_vis"].append(P["ref_vis"])
+
+    def finish(self, env, obs) -> dict:
+        out = {k: np.asarray(v) for k, v in self.rec.items()}
+        out.update({f"img_{c}": np.asarray(v, dtype=np.uint8) for c, v in self.imgs.items()})
+        out["instruction"] = np.array(obs["instruction"])
+        out["subgoals"] = np.array([st.text for st in env.task.steps])
+        out["task_kind"] = np.array(env.task.kind)
+        out["cameras"] = np.array(self.cameras)
+        return out
 
 
 def run_episode(seed: int, cfg_kwargs: dict, noise: float):
@@ -29,49 +67,17 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
     env = DynamicStackEnv(cfg)
     obs, info = env.reset(seed=seed)
     ex = StackExpert(env, seed=seed, noise=noise)
-    rec = {
-        k: []
-        for k in [
-            "proprio",
-            "action",
-            "tgt_pos",
-            "tgt_vel_y",
-            "src_pos",
-            "occluded",
-            "phase",
-            "step",
-            "ref_uv",
-            "ref_vis",
-        ]
-    }
-    imgs = {c: [] for c in cfg.cameras}
+    rec = EpisodeRecorder(cfg.cameras)
     success = False
     for _ in range(int(cfg.max_time_s * cfg.control_hz)):
         a = ex.act(info)
-        P = info["priv"]
-        for c in cfg.cameras:
-            imgs[c].append(obs["images"][c])
-        rec["proprio"].append(obs["proprio"])
-        rec["action"].append(a)
-        rec["tgt_pos"].append(P["tgt_pos"])
-        rec["tgt_vel_y"].append(P["tgt_vel"][1])
-        rec["src_pos"].append(P["src_pos"])
-        rec["occluded"].append(P["occluded"])
-        rec["phase"].append(PHASES.index(ex.phase))
-        rec["step"].append(P["step"])
-        rec["ref_uv"].append(P["ref_uv"])
-        rec["ref_vis"].append(P["ref_vis"])
+        rec.add(obs, info, a, ex.phase)
         obs, _, term, trunc, info = env.step(a)
         success = info["success"]
         if term or trunc:
             break
     env.close()
-    out = {k: np.asarray(v) for k, v in rec.items()}
-    out.update({f"img_{c}": np.asarray(v, dtype=np.uint8) for c, v in imgs.items()})
-    out["instruction"] = np.array(obs["instruction"])
-    out["subgoals"] = np.array([st.text for st in env.task.steps])
-    out["task_kind"] = np.array(env.task.kind)
-    out["cameras"] = np.array(cfg.cameras)
+    out = rec.finish(env, obs)
     return seed, success, out
 
 
@@ -88,6 +94,11 @@ def main():
     ap.add_argument("--img-size", type=int, default=96, help="side of the square image stored / seen by the policy")
     ap.add_argument("--render-hw", type=int, nargs=2, default=None, metavar=("H", "W"),
                     help="native render size, letterboxed to --img-size (e.g. 480 640 or 1080 1920)")  # fmt: skip
+    ap.add_argument("--wrist-mount", choices=["legacy", "oak"], default="legacy",
+                    help="oak = OAK-D Pro on the flange adapter plate (see docs/MUJOCO.md)")  # fmt: skip
+    ap.add_argument("--overhead-view", choices=["top", "front"], default="top",
+                    help="front = top camera beyond the belt looking back at the robot")  # fmt: skip
+    ap.add_argument("--cameras", nargs="+", default=["front", "wrist"])
     ap.add_argument("--noise", type=float, default=0.0, help="expert action noise (DART-style)")
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
     ap.add_argument("--speed-change", action="store_true")
@@ -107,6 +118,9 @@ def main():
         n_distractors=a.distractors,
         n_table_distractors=a.table_distractors,
         task=a.task,
+        cameras=tuple(a.cameras),
+        wrist_mount=a.wrist_mount,
+        overhead_view=a.overhead_view,
         dr_scale=a.dr_scale,
         **EnvConfig.dr_flags(not a.no_dr),
     )
@@ -119,9 +133,11 @@ def main():
     with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
         for seed, ok, ep in ex.map(_job, jobs):
             if ok:
-                np.savez_compressed(out / f"ep_{seed:06d}.npz", **ep)
+                write_episode(out, seed, ep)
                 kept += 1
             print(f"seed {seed}: {'ok' if ok else 'FAILED (dropped)'} T={len(ep['action'])}", flush=True)
+    args = {**cfg, "noise": a.noise, "seed0": a.seed0, "episodes_requested": a.episodes}
+    write_manifest(out, "demos", "vla_mujoco.data.collect", args, episodes_saved=kept)
     print(f"saved {kept}/{a.episodes} successful episodes to {out}")
 
 

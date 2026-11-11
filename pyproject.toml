@@ -11,7 +11,9 @@ requires-python = ">=3.10"
 dependencies = ["mujoco>=3.2", "numpy", "pillow"]
 
 [project.optional-dependencies]
-train = ["torch"]                 # CPU build is enough for smoke runs; install a CUDA build for real training
+# torch: a CPU build is enough for smoke runs, install a CUDA build for real training.
+# transformers: the frozen pretrained text encoder (--text-encoder pretrained) and ViT backbone (--vision).
+train = ["torch", "transformers"]
 dev = ["pytest", "ruff", "pre-commit"]
 
 [project.scripts]

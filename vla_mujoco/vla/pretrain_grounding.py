@@ -27,9 +27,15 @@ from .train import EMA, augment, lr_at
 
 
 def load_scenes(path, cameras):
+    """Memory-mapped images (one array per camera) + labels; legacy ``scenes_*.npz`` shards are still readable."""
+    path = Path(path)
+    if (path / "meta.npz").exists():
+        z = np.load(path / "meta.npz")
+        imgs = [np.load(path / f"img_{c}.npy", mmap_mode="r") for c in cameras]
+        return imgs, z["ref_uv"], z["ref_vis"], [str(t) for t in z["instruction"]]
     imgs = {c: [] for c in cameras}
     uv, vis, instr = [], [], []
-    for f in sorted(Path(path).glob("scenes_*.npz")):
+    for f in sorted(path.glob("scenes_*.npz")):
         z = np.load(f)
         for c in cameras:
             imgs[c].append(z[f"img_{c}"])

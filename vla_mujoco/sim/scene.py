@@ -45,6 +45,30 @@ VGC10_MESH_DIR = (
     / "visual"
 )
 
+# --- flange adapter plate and the optional OAK-D Pro wrist camera ------------------------------------------------
+# link6.stl ends in a flat flange face at exactly z = 0 (measured from the vendored mesh), and the VGC10 body starts at
+# TOOL_MOUNT_Z = 15 mm (as in the Gazebo URDF). An adapter plate of exactly that thickness fills the gap.
+ASSETS = Path(__file__).resolve().parent / "assets"
+ADAPTER_DIR = ASSETS / "adapter"
+OAK_MESH = ASSETS / "oak_d_pro" / "oak_d_pro.stl"
+ADAPTER_T = TOOL_MOUNT_Z
+ADAPTER_R = 0.045  # plate disc radius (the flange shoulder is ~47 mm, the end face 31.5 mm)
+ADAPTER_BORE_R = 0.011  # central bore for the vacuum line / cables
+ADAPTER_HOLE_R, ADAPTER_HOLE_RING_R, ADAPTER_N_HOLES = 0.0027, 0.0215, 6  # illustrative bolt circle (not a drawing)
+WING_HALF_W, WING_TIP_Y = 0.0525, 0.135  # camera wing: half width (covers the 97 mm camera), reach along +y
+OAK_HALF = (0.0485, 0.01475, 0.01155)  # OAK-D Pro enclosure half extents (97.0 x 29.5 x 23.1 mm)
+OAK_LENS_X = (-0.0375, 0.0, 0.0375)  # stereo pair +-37.5 mm, RGB in the middle
+OAK_OPTICAL_CENTRE = (0.0, 0.095, 0.060)  # centre of the camera's front plate, tool frame (x right, z toward the cups)
+OAK_TARGET = (0.0, 0.0, 0.18)  # it looks at the cup tips
+OAK_GAP = 0.001  # camera back to wing face
+OAK_FOVY = 70.0
+WRIST_MOUNTS = ("legacy", "oak")
+OVERHEAD_VIEWS = ("top", "front")
+OVERHEAD_FRONT_POS, OVERHEAD_FRONT_TARGET = (
+    (0.95, 0.0, 1.15),
+    (0.45, 0.0, 0.08),
+)  # beyond the belt, looking at the robot
+
 # (xyz, rpy) of each joint frame relative to its parent link (uf850_default_kinematics.yaml)
 JOINT_FRAMES = [
     ((0, 0, 0.364), (0, 0, 0)),
@@ -107,8 +131,84 @@ def is_lfs_pointer(path: Path) -> bool:
         return False
 
 
-def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
+def _mat_to_quat(R) -> np.ndarray:
+    """Rotation matrix -> MuJoCo quaternion (w, x, y, z)."""
+    R = np.asarray(R, float)
+    t = np.trace(R)
+    if t > 0:
+        w = math.sqrt(t + 1) / 2
+        q = [w, (R[2, 1] - R[1, 2]) / (4 * w), (R[0, 2] - R[2, 0]) / (4 * w), (R[1, 0] - R[0, 1]) / (4 * w)]
+    else:
+        i = int(np.argmax(np.diag(R)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        r = math.sqrt(R[i, i] - R[j, j] - R[k, k] + 1) / 2
+        v = [0.0] * 3
+        v[i] = r
+        v[j] = (R[j, i] + R[i, j]) / (4 * r)
+        v[k] = (R[k, i] + R[i, k]) / (4 * r)
+        q = [(R[k, j] - R[j, k]) / (4 * r), *v]
+    q = np.array(q)
+    return q / np.linalg.norm(q)
+
+
+def oak_pose() -> dict:
+    """Pose of the OAK-D Pro on the adapter wing (tool frame).
+
+    ``d`` is the viewing direction (towards the cup tips) and the front-plate normal; the device frame has +z = d and
+    x along its long axis. ``plane_point`` lies on the wing face the camera back rests on (normal d)."""
+    P, T = np.asarray(OAK_OPTICAL_CENTRE, float), np.asarray(OAK_TARGET, float)
+    d = (T - P) / np.linalg.norm(T - P)
+    x = np.array([1.0, 0.0, 0.0])
+    y = np.cross(d, x)
+    hz = OAK_HALF[2]
+    back = P - 2 * hz * d
+    return dict(d=d, quat=_mat_to_quat(np.column_stack([x, y, d])), center=P - hz * d, back=back,
+                plane_point=back - OAK_GAP * d)  # fmt: skip
+
+
+def overhead_camera_xml(view: str) -> str:
+    if view == "top":
+        return f'<camera name="overhead" pos="{BELT_X - 0.1} 0 1.25" xyaxes="0 -1 0 1 0 0" fovy="55"/>'
+    pos, tgt = np.asarray(OVERHEAD_FRONT_POS, float), np.asarray(OVERHEAD_FRONT_TARGET, float)
+    fwd = (tgt - pos) / np.linalg.norm(tgt - pos)
+    xc = np.cross(fwd, [0.0, 0.0, 1.0])
+    xc /= np.linalg.norm(xc)
+    yc = np.cross(-fwd, xc)
+    return f'<camera name="overhead" pos="{_f(pos)}" xyaxes="{_f(xc)} {_f(yc)}" fovy="55"/>'
+
+
+def wrist_camera_xml(mount: str, indent: str) -> str:
+    """Legacy camera, or the OAK-D Pro (visual mesh + true-size collision box + lens markers) with its optical frame."""
+    if mount == "legacy":
+        return f'{indent}  <camera name="wrist" pos="0.0 0.075 0.12" quat="0 1 0 0" fovy="85"/>\n'
+    pose, hz = oak_pose(), OAK_HALF[2]
+    lens = "".join(
+        f'<geom type="cylinder" size="0.0055 0.0004" pos="{lx} 0 {hz + 0.0004}" rgba="0.02 0.02 0.03 1" class="toolvis"/>'
+        for lx in OAK_LENS_X
+    )
+    # gravcomp keeps the arm's behaviour identical to the camera-less tool (the tool body is gravity compensated)
+    return (
+        f'{indent}  <body name="oak_wrist" pos="{_f(pose["center"])}" quat="{_f(pose["quat"])}" gravcomp="1">'
+        f'<geom name="oak_wrist_vis" type="mesh" mesh="oak" rgba="0.16 0.17 0.19 1" class="toolvis"/>'
+        f'<geom name="oak_wrist_col" type="box" size="{_f(OAK_HALF)}" mass="0.09" class="toolcol"/>{lens}'
+        f'<camera name="wrist" pos="0 0 {hz}" quat="0 1 0 0" fovy="{OAK_FOVY}"/></body>\n'
+    )
+
+
+def build_mjcf(
+    img_h: int = 128, img_w: int | None = None, wrist_mount: str = "legacy", overhead_view: str = "top"
+) -> str:
+    """MJCF of the whole scene. ``wrist_mount``: "legacy" camera or "oak" (OAK-D Pro on the adapter-plate wing);
+    ``overhead_view``: "top" (straight down) or "front" (beyond the belt, looking back at the robot)."""
+    if wrist_mount not in WRIST_MOUNTS or overhead_view not in OVERHEAD_VIEWS:
+        raise ValueError(f"wrist_mount must be one of {WRIST_MOUNTS}, overhead_view one of {OVERHEAD_VIEWS}")
     img_w = img_w or img_h
+    adapter = "adapter_plate" if wrist_mount == "oak" else "adapter_disc"
+    extra = [ADAPTER_DIR / f"{adapter}.stl"] + (
+        [OAK_MESH, ADAPTER_DIR / "adapter_wing.stl"] if wrist_mount == "oak" else []
+    )
+    if any(is_lfs_pointer(f) for f in extra):
+        raise RuntimeError(LFS_HINT)
     arm_meshes = [ASSET_DIR / f"{n}.stl" for n in ("link_base", "link1", "link2", "link3", "link4", "link5", "link6")]
     if any(is_lfs_pointer(f) for f in arm_meshes):
         raise RuntimeError(LFS_HINT)
@@ -122,6 +222,11 @@ def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
         if have_vgc
         else ""
     )
+    tool_meshes = f'<mesh name="{adapter}" file="{ADAPTER_DIR / (adapter + ".stl")}"/>' + (
+        f'\n    <mesh name="oak" file="{OAK_MESH}"/>\n    <mesh name="adapter_wing" file="{ADAPTER_DIR / "adapter_wing.stl"}"/>'
+        if wrist_mount == "oak"
+        else ""
+    )
     meshes = (
         "\n    ".join(
             f'<mesh name="{n}" file="{n}.stl"/>'
@@ -129,6 +234,8 @@ def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
         )
         + "\n    "
         + vgc_assets
+        + "\n    "
+        + tool_meshes
     )
 
     # nested arm bodies
@@ -166,11 +273,17 @@ def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
                 for x, y in cup_pos
             )
         )
+    adapter_wing_col = (
+        f'{indent}  <geom name="tool_adapter_wing_col" type="mesh" mesh="adapter_wing" mass="0.12" class="toolcol"/>\n'
+        if wrist_mount == "oak"
+        else ""
+    )
     tool = f"""{indent}<body name="tool" pos="0 0 0" gravcomp="1">
-{indent}  <geom type="box" size="0.0505 0.05 0.05" pos="0 0 {TOOL_MOUNT_Z + 0.05}" mass="0.774" class="toolcol"/>
+{indent}  <geom name="tool_adapter" type="mesh" mesh="{adapter}" rgba="0.78 0.80 0.83 1" class="toolvis"/>
+{indent}  <geom name="tool_adapter_col" type="cylinder" size="{ADAPTER_R} {ADAPTER_T / 2}" pos="0 0 {ADAPTER_T / 2}" mass="0.10" class="toolcol"/>
+{adapter_wing_col}{indent}  <geom type="box" size="0.0505 0.05 0.05" pos="0 0 {TOOL_MOUNT_Z + 0.05}" mass="0.774" class="toolcol"/>
 {vis}{indent}  <site name="tcp" pos="0 0 {TOOL_TCP_Z}" size="0.004" rgba="1 0 0 1"/>
-{indent}  <camera name="wrist" pos="0.0 0.075 0.12" quat="0 1 0 0" fovy="85"/>
-{indent}</body>
+{wrist_camera_xml(wrist_mount, indent)}{indent}</body>
 """
     arm += tool + "".join(reversed(closers))
 
@@ -252,7 +365,7 @@ def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
     </body>
     <body name="focus" pos="0.55 0 0.1"/>
     <camera name="front" pos="1.25 0 0.62" mode="targetbody" target="focus" fovy="50"/>
-    <camera name="overhead" pos="{BELT_X - 0.1} 0 1.25" xyaxes="0 -1 0 1 0 0" fovy="55"/>
+    {overhead_camera_xml(overhead_view)}
   </worldbody>
   <equality>
     {welds}

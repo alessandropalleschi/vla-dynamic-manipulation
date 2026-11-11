@@ -18,30 +18,34 @@ from pathlib import Path
 import numpy as np
 
 from ..sim.env import DynamicStackEnv, EnvConfig
+from .store import write_manifest
 
 
 def make_shard(args):
-    shard, n, seed0, img_size, cameras, render_hw = args
-    env = DynamicStackEnv(EnvConfig(seed=seed0, img_size=img_size, render_hw=render_hw, cameras=cameras, task="random"))
+    """Render scenes [start, start + n) straight into the preallocated image arrays (no big pickles, no RAM spike)."""
+    start, n, seed0, img_size, cameras, render_hw, out_dir, wrist_mount, overhead_view = args
+    env = DynamicStackEnv(
+        EnvConfig(seed=seed0, img_size=img_size, render_hw=render_hw, cameras=cameras, task="random",
+                  wrist_mount=wrist_mount, overhead_view=overhead_view)
+    )  # fmt: skip
     rng = np.random.default_rng(seed0 + 10_000_019)
-    imgs = {c: [] for c in cameras}
+    maps = {c: np.load(Path(out_dir) / f"img_{c}.npy", mmap_mode="r+") for c in cameras}
     uv, vis, instr, kind = [], [], [], []
     for i in range(n):
         env.cfg.n_distractors = int(rng.integers(1, 4))
         env.cfg.n_table_distractors = int(rng.integers(0, 3))
         obs, info = env.reset(seed=seed0 + i)
         for c in cameras:
-            imgs[c].append(obs["images"][c])
+            maps[c][start + i] = obs["images"][c]
         P = info["priv"]
         uv.append(P["ref_uv"])
         vis.append(P["ref_vis"])
         instr.append(obs["instruction"])
         kind.append(env.task.kind)
     env.close()
-    out = {f"img_{c}": np.stack(v).astype(np.uint8) for c, v in imgs.items()}
-    out.update(ref_uv=np.stack(uv).astype(np.float32), ref_vis=np.stack(vis), instruction=np.array(instr),
-               task_kind=np.array(kind), cameras=np.array(cameras))  # fmt: skip
-    return shard, out
+    for m in maps.values():
+        m.flush()
+    return start, np.stack(uv).astype(np.float32), np.stack(vis), instr, kind
 
 
 def main():
@@ -56,18 +60,40 @@ def main():
     )
     ap.add_argument("--seed0", type=int, default=1_000_000)
     ap.add_argument("--cameras", nargs="+", default=["front", "wrist"])
+    ap.add_argument("--wrist-mount", choices=["legacy", "oak"], default="legacy",
+                    help="oak = OAK-D Pro on the flange adapter plate (see docs/MUJOCO.md)")  # fmt: skip
+    ap.add_argument("--overhead-view", choices=["top", "front"], default="top",
+                    help="front = top camera beyond the belt looking back at the robot")  # fmt: skip
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.json").write_text(json.dumps({"img_size": a.img_size, "render_hw": a.render_hw}))
-    n_shards = -(-a.scenes // a.per_shard)
-    jobs = [(i, min(a.per_shard, a.scenes - i * a.per_shard), a.seed0 + i * a.per_shard, a.img_size, tuple(a.cameras),
-             tuple(a.render_hw) if a.render_hw else None)
-            for i in range(n_shards)]  # fmt: skip
+    cams = tuple(a.cameras)
+    (out / "config.json").write_text(
+        json.dumps(
+            {
+                "img_size": a.img_size,
+                "render_hw": a.render_hw,
+                "wrist_mount": a.wrist_mount,
+                "overhead_view": a.overhead_view,
+            }
+        )
+    )
+    for c in cams:  # preallocate: workers fill their slice in place
+        m = np.lib.format.open_memmap(out / f"img_{c}.npy", mode="w+", dtype=np.uint8,
+                                      shape=(a.scenes, a.img_size, a.img_size, 3))  # fmt: skip
+        m.flush()
+        del m
+    jobs = [(i, min(a.per_shard, a.scenes - i), a.seed0 + i, a.img_size, cams,
+             tuple(a.render_hw) if a.render_hw else None, str(out), a.wrist_mount, a.overhead_view)
+            for i in range(0, a.scenes, a.per_shard)]  # fmt: skip
+    uv, vis, instr, kind = [], [], [], []
     with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
-        for shard, data in ex.map(make_shard, jobs):
-            np.savez_compressed(out / f"scenes_{shard:04d}.npz", **data)
-            print(f"shard {shard + 1}/{n_shards} ({len(data['instruction'])} scenes)", flush=True)
+        for start, u, v, ins, kd in ex.map(make_shard, jobs):  # ordered: concatenation matches the image rows
+            uv.append(u), vis.append(v), instr.extend(ins), kind.extend(kd)
+            print(f"scenes {start + len(ins)}/{a.scenes}", flush=True)
+    np.savez_compressed(out / "meta.npz", ref_uv=np.concatenate(uv), ref_vis=np.concatenate(vis),
+                        instruction=np.array(instr), task_kind=np.array(kind), cameras=np.array(cams))  # fmt: skip
+    write_manifest(out, "static_scenes", "vla_mujoco.data.static_scenes", vars(a), scenes=a.scenes)
     print(f"saved {a.scenes} scenes to {out}")
 
 

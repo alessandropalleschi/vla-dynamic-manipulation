@@ -143,6 +143,55 @@ Control rate x fixed command latency (`python -m vla_mujoco.sweep_rate`, 30 `sta
 `data/collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.
 
+## Hardware: flange adapter, OAK-D Pro wrist camera, top camera
+Three options, all defaulting to the original behaviour (`EnvConfig.wrist_mount="legacy"`, `overhead_view="top"`);
+checkpoints record the hardware they were trained on and `vla-eval` / DAgger rebuild it from the checkpoint (an explicit
+`--wrist-mount` / `--overhead-view` flag wins).
+
+* **Flange adapter plate (always present).** `link6.stl` ends in a flat flange face at exactly z = 0 and the Gazebo URDF
+  mounts the VGC10 15 mm beyond it, so the old model had a 15 mm air gap. A 15 mm plate (disc Ø90 mm, Ø22 mm bore,
+  6-hole bolt circle) fills it exactly: TCP, reach and kinematics are unchanged. The bolt circle is illustrative, not
+  matched to the xArm flange or the VGC10 interface drawings.
+* **`wrist_mount="oak"`: one OAK-D Pro on the plate.** Following the usual machined-bracket design, the camera mount is
+  *part of the adapter plate*: a wing out to +y whose upper face is an inclined plane. The camera sits directly on that
+  face, so the face angle is the camera tilt: the optical axis is 38.4 deg off the tool axis and points at the cup tips
+  (optical centre 95 mm out and 60 mm along the tool; the wing is 61 mm tall at its tip; 1 mm gap between camera and face).
+  The camera is the official Luxonis enclosure (97.0 x 29.5 x 23.1 mm, `sim/assets/oak_d_pro/`, MIT, see its NOTICE) as a
+  visual mesh with a true-size collision box and lens markers; the plate is a visual mesh with a disc cylinder and a
+  *convex* wedge as collision shapes (the convex hull of the whole plate would bridge the step and poke into the camera).
+  Vertical field of view is assumed to be 70 deg (the real RGB sensor was not checked); it is the `wrist` camera, so
+  `cameras=("front", "wrist")` keeps working. One camera, on the +y side, because the front and top cameras both look from
+  +x: the wrist view supplies the orthogonal horizontal axis and the height cue (see the findings on contact visibility).
+* **`overhead_view="front"`: the top camera beyond the conveyor**, at x 0.95, z 1.15 looking back at the robot and the
+  work area (0.45, 0, 0.08), 25 deg from vertical, so object sides and heights are visible. The image is rotated 180 deg
+  relative to the straight-down view, so models are not interchangeable between the two. A smaller tilt needs a higher
+  mount (about 1.6 m for 15 deg).
+
+CLI: `--wrist-mount oak --overhead-view front --cameras front wrist overhead` for `vla-collect`,
+`python -m vla_mujoco.data.static_scenes` and `vla-eval`; `make data DATA=data_oak CAMS="front wrist overhead"
+HW="--wrist-mount oak --overhead-view front"` rebuilds everything for the new hardware in its own directory.
+Regenerate the meshes with `sim/assets/adapter/build_adapter.py` and `sim/assets/oak_d_pro/prep_mesh.py`
+(build-time deps only: trimesh, shapely, mapbox-earcut, fast-simplification, rtree).
+
+Verification (`tests/test_hardware.py` plus a sweep of 60 crowded expert episodes, all four task kinds, full randomisation
+incl. camera jitter):
+
+| | no camera (adapter disc only) | OAK-D Pro on the plate |
+|---|---|---|
+| expert success | 60/60 | 60/60 |
+| contacts of any hardware with anything | 0 | 0 |
+| closest approach to task objects / bystanders | 175 / 169 mm | **97 / 72 mm** |
+| closest approach to table or belt | 148 mm | 88 mm |
+| closest approach to the robot's own links (link6 excluded) | - | **34.5 mm** |
+
+The tests pin: the adapter meets the flange face and the VGC10 with no gap (measured from the vendored link6 mesh), the
+wing face is the exact plane the camera back rests on (so a camera constant changed without regenerating the plate fails),
+the optical axis hits the cup tips, the camera clears the VGC10 body, and checkpoints carry their hardware into
+evaluation and DAgger. Limits: the simulator does **not** model arm self-collision, and 34.5 mm is the expert's closest
+approach, so a learned policy with wilder wrist poses is not covered; the wedge is chunky (61 mm tall) compared with a
+slim machined plate; camera-pose randomisation jitters the camera but not its mesh; the camera's real mounting holes and the
+plate's bolt pattern are not verified.
+
 ## Image resolution
 The policy sees a **square** image of side `img_size`. The simulator can render at any native size and letterbox it:
 `EnvConfig(img_size=224, render_hw=(480, 640))` (CLI: `--img-size 224 --render-hw 480 640`; 1080p is `1080 1920`) renders
