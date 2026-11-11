@@ -57,3 +57,10 @@ def test_meshes_are_lfs_tracked_and_ignored_outputs_cover_all_run_dirs():
         assert re.search(rf"^\*\.{ext} filter=lfs", attrs, re.M), ext
     assert re.search(r"^runs\*/$", read(".gitignore"), re.M)
     assert re.search(r"^data/\*$", read(".gitignore"), re.M)
+
+
+def test_dockerfile_drops_the_expired_yarn_apt_source_before_updating():
+    """The base image's Yarn apt key has expired; `apt-get update` fails with NO_PUBKEY unless the source is removed."""
+    df = "\n".join(line for line in read(".devcontainer/Dockerfile").splitlines() if not line.lstrip().startswith("#"))
+    assert "yarn.list" in df
+    assert df.index("yarn.list") < df.index("apt-get update") < df.index("apt-get install")
