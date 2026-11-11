@@ -193,6 +193,7 @@ class VLAPolicy(nn.Module):
         patch=16,
         vision="cnn",
         vision_size=224,
+        slots=False,
     ):
         super().__init__()
         text = TextConfig(**text) if isinstance(text, dict) else (text or TextConfig())
@@ -202,7 +203,7 @@ class VLAPolicy(nn.Module):
         self.cfg = dict(
             cameras=list(cameras), proprio_dim=proprio_dim, arch=arch, chunk=chunk, window=window, hidden=hidden,
             d_model=d_model, head=head, flow_steps=flow_steps, text=vars(text).copy(),
-            patch=patch, vision=vision, vision_size=vision_size,
+            patch=patch, vision=vision, vision_size=vision_size, slots=slots,
         )  # fmt: skip
         self.img = ImageEncoder(d_model, patch) if vision == "cnn" else PretrainedViT(vision, d_model, vision_size)
         self.cam_emb = nn.Parameter(torch.randn(len(cameras), 1, d_model) * 0.02)
@@ -226,6 +227,11 @@ class VLAPolicy(nn.Module):
         # referring-expression grounding: per image patch, is this where the instructed object (pick / support) is?
         self.g_pick = nn.Linear(d_model, 1)
         self.g_sup = nn.Linear(d_model, 1)
+        # grounded object slots: the grounding distributions pool the patch features of the named pick / support object
+        # (and their expected image coordinates) and feed them into the belief, so actions must use the language
+        self.slots = slots
+        if slots:
+            self.slot_proj = nn.Sequential(nn.Linear(len(cameras) * 2 * (d_model + 2), d_model), nn.LayerNorm(d_model))
         self.register_buffer("p_mean", torch.zeros(proprio_dim))
         self.register_buffer("p_std", torch.ones(proprio_dim))
 
@@ -246,16 +252,24 @@ class VLAPolicy(nn.Module):
         key_pad = torch.cat([torch.zeros(B * T, n_pre, dtype=torch.bool, device=seq.device), pad], 1)
         out = self.out_norm(self.fusion(seq, src_key_padding_mask=key_pad))  # (B*T, S, d)
         x = out[:, 0].reshape(B, T, -1)
-        gl, off = None, 2
-        if ground:  # logits over each camera's patches for [pick, support]: list of (B, T, 2, N)
+        gl, off, slot_feats = None, 2, []
+        if ground or self.slots:  # per camera: logits over patches for [pick, support] -> (B, T, 2, N)
             gl = []
             for t in toks:
                 n = t.shape[1]
                 patch = out[:, off : off + n]
                 off += n
-                gl.append(
-                    torch.stack([self.g_pick(patch).squeeze(-1), self.g_sup(patch).squeeze(-1)], 1).view(B, T, 2, n)
-                )
+                lg = torch.stack([self.g_pick(patch).squeeze(-1), self.g_sup(patch).squeeze(-1)], 1)  # (B*T, 2, N)
+                gl.append(lg.view(B, T, 2, n))
+                if self.slots:
+                    w = torch.softmax(lg, -1)  # attention of each role over the patches
+                    g = int(round(n**0.5))
+                    cell = (torch.arange(g, device=w.device).float() + 0.5) / g
+                    uv = torch.stack([cell.repeat(g), cell.repeat_interleave(g)], -1)  # (N, 2): (u, v) of patch centres
+                    slot_feats.append(torch.einsum("bkn,bnd->bkd", w, patch).flatten(1))  # pooled features (B*T, 2*d)
+                    slot_feats.append(torch.einsum("bkn,nc->bkc", w, uv).flatten(1))  # expected coordinates (B*T, 4)
+        if self.slots:
+            x = x + self.slot_proj(torch.cat(slot_feats, -1)).view(B, T, -1)
         if self.arch == "stack":  # concat the last `window` per-step features (first frame repeated)
             x = torch.cat([torch.cat([x[:, :1].repeat(1, k, 1), x], 1)[:, :T] for k in range(self.window)], -1)
         z = self.fuse(x)

@@ -208,6 +208,7 @@ def main():
     ap.add_argument(
         "--patch", type=int, default=16, choices=[8, 16, 32], help="CNN patch stride (token grid = size/patch)"
     )
+    ap.add_argument("--slots", action="store_true", help="feed grounded pick/support object slots into the belief")
     ap.add_argument("--vision-size", type=int, default=224, help="input side for a pretrained ViT (resized)")
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--batch", type=int, default=16)
@@ -260,9 +261,18 @@ def main():
     )
 
     # ---- model
-    model = VLAPolicy(a.cameras, arch=a.arch, chunk=a.chunk, head=a.head, flow_steps=a.flow_steps, text=backend.cfg).to(
-        dev
-    )
+    model = VLAPolicy(
+        a.cameras,
+        arch=a.arch,
+        chunk=a.chunk,
+        head=a.head,
+        flow_steps=a.flow_steps,
+        text=backend.cfg,
+        patch=a.patch,
+        vision=a.vision,
+        vision_size=a.vision_size,
+        slots=a.slots,
+    ).to(dev)
     if a.init:
         sd, own = torch.load(a.init, map_location=dev)["model"], model.state_dict()
         keep = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape and not k.startswith("p_")}

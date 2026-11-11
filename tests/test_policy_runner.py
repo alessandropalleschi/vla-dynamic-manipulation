@@ -87,14 +87,39 @@ def test_training_run_checkpoint_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["collect", *collect_args.split()])
     collect.main()
     base = f"--data {data} --out {out} --arch gru --head flow --text-encoder scratch --batch 2 --seq 10 --burn-in 2"
-    base += " --val-every 2 --val-batches 1"
+    base += " --val-every 2 --val-batches 1 --patch 8 --slots"
     monkeypatch.setattr(sys, "argv", ["train", *base.split(), "--steps", "4", "--warmup", "1"])
     train.main()
     for f in ("policy.pt", "best.pt", "last.pt", "log.csv"):
         assert (out / f).exists()
     model = VLAPolicy.from_checkpoint(torch.load(out / "policy.pt", map_location="cpu"))
     assert model.head_kind == "flow" and model.arch == "gru" and model.text_cfg.kind == "scratch"
+    # CLI options must reach the model (a silently ignored flag would invalidate every experiment)
+    assert model.cfg["patch"] == 8 and model.cfg["slots"] is True and model.slots
     # resuming continues from the saved step
     monkeypatch.setattr(sys, "argv", ["train", *base.split(), "--steps", "6", "--resume"])
     train.main()
     assert torch.load(out / "last.pt", map_location="cpu")["step"] == 6
+
+
+def test_slots_make_the_action_pathway_depend_on_the_grounding_head():
+    """With grounded object slots the belief is a function of the grounding head; without them it is not."""
+    backend = TextBackend(TextConfig(kind="bow"))
+    for slots, expect_grad in ((True, True), (False, False)):
+        m = VLAPolicy(arch="mlp", text=backend.cfg, slots=slots)
+        imgs, pr, txt = batch(m, backend)
+        z, _ = m.features(imgs, pr, txt)
+        z.sum().backward()
+        g = m.g_pick.weight.grad
+        assert (g is not None and float(g.abs().sum()) > 0) == expect_grad, slots
+
+
+def test_slots_checkpoint_roundtrip_and_text_dependence():
+    backend = TextBackend(TextConfig(kind="bow"))
+    m = VLAPolicy(arch="gru", text=backend.cfg, slots=True).eval()
+    m2 = VLAPolicy.from_checkpoint({"model": m.state_dict(), "cfg": m.cfg})
+    assert m2.slots
+    imgs, pr, _ = batch(m, backend, B=1)
+    za, _ = m.features(imgs, pr, backend.encode([TEXTS[0]]))
+    zb, _ = m.features(imgs, pr, backend.encode(["put the blue block onto the red cube"]))
+    assert not torch.allclose(za, zb)
