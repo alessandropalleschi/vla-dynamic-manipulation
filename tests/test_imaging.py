@@ -72,3 +72,22 @@ def test_pretrained_vit_backbone_if_available():
         pytest.skip(f"pretrained ViT unavailable: {e}")
     assert gl[0].shape[-1] == 64  # 112 / 14 = 8 -> 8 x 8 patches
     assert not any("_bb" in k or "backbone" in k for k in m.state_dict())  # frozen backbone not checkpointed
+
+
+def test_lfs_pointer_files_give_a_clear_error(tmp_path, monkeypatch):
+    """A checkout without git-lfs contains pointer stubs instead of meshes: fail with an actionable message."""
+    from vla_mujoco.sim import scene
+
+    stub_text = "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 10\n"
+    stub = tmp_path / "stub.stl"
+    stub.write_text(stub_text)
+    real = tmp_path / "real.stl"
+    real.write_bytes(b"solid x\n" + b"\0" * 100)
+    assert scene.is_lfs_pointer(stub) and not scene.is_lfs_pointer(real) and not scene.is_lfs_pointer(tmp_path / "nope")
+    for name in ("link_base", "link1", "link2", "link3", "link4", "link5", "link6"):
+        (tmp_path / f"{name}.stl").write_bytes(real.read_bytes())
+    monkeypatch.setattr(scene, "ASSET_DIR", tmp_path)
+    scene.build_mjcf(32)  # real files (no stubs) -> fine, no exception
+    (tmp_path / "link3.stl").write_text(stub_text)
+    with pytest.raises(RuntimeError, match="git lfs pull"):
+        scene.build_mjcf(32)

@@ -9,7 +9,8 @@ install:            ## editable install with training + dev extras, plus git hoo
 gpu-check:          ## CUDA + GPU (EGL) rendering sanity check
 	$(PY) -m vla_mujoco.gpu_check
 
-hooks:              ## install the git pre-commit hooks (large-file / artifact guard, ruff)
+hooks:              ## git pre-commit hooks (large-file / artifact guard, ruff) + Git LFS for meshes
+	git lfs install
 	$(PY) -m pre_commit install
 
 test:               ## fast simulator tests (no GPU, no rendering)

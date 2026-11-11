@@ -92,11 +92,30 @@ def _f(v) -> str:
     return " ".join(f"{x:.6g}" for x in v)
 
 
+LFS_HINT = (
+    "Mesh files are stored with Git LFS but this checkout contains LFS pointer files instead of meshes. "
+    "Install git-lfs (https://git-lfs.com) and run:  git lfs install && git lfs pull"
+)
+
+
+def is_lfs_pointer(path: Path) -> bool:
+    """True if ``path`` is a Git LFS pointer (a tiny text stub) rather than the real file."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(40).startswith(b"version https://git-lfs")
+    except OSError:
+        return False
+
+
 def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
     img_w = img_w or img_h
-    have_vgc = (VGC10_MESH_DIR / "base_link_4cups.stl").is_file() and (
-        VGC10_MESH_DIR / "suction_cup_1cup.stl"
-    ).is_file()
+    arm_meshes = [ASSET_DIR / f"{n}.stl" for n in ("link_base", "link1", "link2", "link3", "link4", "link5", "link6")]
+    if any(is_lfs_pointer(f) for f in arm_meshes):
+        raise RuntimeError(LFS_HINT)
+    vgc_files = [VGC10_MESH_DIR / "base_link_4cups.stl", VGC10_MESH_DIR / "suction_cup_1cup.stl"]
+    if any(is_lfs_pointer(f) for f in vgc_files):
+        raise RuntimeError(LFS_HINT)
+    have_vgc = all(f.is_file() for f in vgc_files)  # missing (not LFS-stub) meshes fall back to primitives
     vgc_assets = (
         f'''<mesh name="vgc10_body" file="{VGC10_MESH_DIR / "base_link_4cups.stl"}"/>
     <mesh name="vgc10_cup" file="{VGC10_MESH_DIR / "suction_cup_1cup.stl"}"/>'''

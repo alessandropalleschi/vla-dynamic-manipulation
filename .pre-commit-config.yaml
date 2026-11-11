@@ -6,7 +6,8 @@ repos:
       - id: check-added-large-files
         name: block large files (> 1 MB)
         args: ["--maxkb=1000"]
-        exclude: ^external/  # vendored third-party assets (meshes) are committed on purpose
+        # files tracked by Git LFS (see .gitattributes: meshes) are skipped by this hook, so big meshes pass
+        # only when LFS-tracked; any other file over the limit is rejected
       - id: check-merge-conflict
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.9

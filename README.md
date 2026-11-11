@@ -13,6 +13,10 @@ language-specified targets, distractors, speed changes and visual occlusion.
 
 ## Quick start (MuJoCo)
 
+> **Git LFS:** meshes (`*.stl`, `*.dae`, `*.obj`, ...) are stored with [Git LFS](https://git-lfs.com). Install it before
+> cloning (`git lfs install`), or run `git lfs pull` afterwards; without it the meshes are tiny pointer files and the
+> simulator stops with an error that says so.
+
 **VS Code:** open the folder, run *Dev Containers: Reopen in Container* and pick a configuration:
 
 | Configuration | Use when | What you get |
@@ -92,7 +96,7 @@ make format
 make test
 ```
 The **pre-commit hooks** reject files over 1 MB and any checkpoint, dataset, recording or `runs*/` / `data/` output
-(`.pre-commit-config.yaml`; vendored `external/` assets are exempt), so training artifacts cannot be committed by accident.
+(`.pre-commit-config.yaml`; meshes are exempt because they are stored in Git LFS, see `.gitattributes`), so training artifacts cannot be committed by accident.
 CI (`.github/workflows/ci.yml`) runs the same hooks and the tests on every push. VS Code tasks/launch configs for demo, collection,
 training and evaluation are in `.vscode/`.
 
