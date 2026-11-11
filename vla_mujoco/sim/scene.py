@@ -92,7 +92,8 @@ def _f(v) -> str:
     return " ".join(f"{x:.6g}" for x in v)
 
 
-def build_mjcf(img_size: int = 128) -> str:
+def build_mjcf(img_h: int = 128, img_w: int | None = None) -> str:
+    img_w = img_w or img_h
     have_vgc = (VGC10_MESH_DIR / "base_link_4cups.stl").is_file() and (
         VGC10_MESH_DIR / "suction_cup_1cup.stl"
     ).is_file()
@@ -179,7 +180,7 @@ def build_mjcf(img_size: int = 128) -> str:
   <compiler angle="radian" meshdir="{ASSET_DIR}" autolimits="true"/>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
   <visual>
-    <global offwidth="{max(img_size, 640)}" offheight="{max(img_size, 480)}"/>
+    <global offwidth="{max(img_w, 640)}" offheight="{max(img_h, 480)}"/>
     <quality shadowsize="2048"/>
     <headlight ambient="0.45 0.45 0.45" diffuse="0.5 0.5 0.5" specular="0.1 0.1 0.1"/>
   </visual>

@@ -21,7 +21,8 @@ def main():
     ap.add_argument("--expert", action="store_true")
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--seed0", type=int, default=10_000)
-    ap.add_argument("--img-size", type=int, default=96)
+    ap.add_argument("--img-size", type=int, default=None, help="default: the size the policy was trained on")
+    ap.add_argument("--render-hw", type=int, nargs=2, default=None, metavar=("H", "W"))
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
     ap.add_argument("--speed-change", action="store_true")
     ap.add_argument("--occlusion-s", type=float, default=0.0)
@@ -44,6 +45,9 @@ def main():
         ck = torch.load(a.policy, map_location="cpu")
         model = VLAPolicy.from_checkpoint(ck)
         cams = tuple(model.cameras)
+        env_cfg = ck.get("env_cfg") or {}
+        a.img_size = a.img_size or env_cfg.get("img_size")
+        a.render_hw = a.render_hw or env_cfg.get("render_hw")
         dev = ("cuda" if torch.cuda.is_available() else "cpu") if a.device == "auto" else a.device
         runner = PolicyRunner(model, device=dev, exec_horizon=a.exec_horizon)  # rebuilds the text backend
     elif not a.expert:
@@ -52,7 +56,8 @@ def main():
     for i in range(a.episodes):
         cfg = EnvConfig(
             seed=a.seed0 + i,
-            img_size=a.img_size,
+            img_size=a.img_size or 96,
+            render_hw=tuple(a.render_hw) if a.render_hw else None,
             cameras=cams,
             render=runner is not None,
             belt_speed_range=tuple(a.speed_range),

@@ -52,16 +52,17 @@ def time_embedding(t: torch.Tensor, dim: int = 64) -> torch.Tensor:
 
 
 class ImageEncoder(nn.Module):
-    """Small CNN -> grid of patch tokens (stride 16)."""
+    """Small CNN -> grid of patch tokens. ``patch`` is the stride: 8 -> 3 conv stages, 16 -> 4, 32 -> 5."""
 
-    def __init__(self, d_model=128):
+    def __init__(self, d_model=128, patch=16):
         super().__init__()
+        chans = [32, 64, 96, 128, 128][: {8: 3, 16: 4, 32: 5}[patch]]
 
         def blk(i, o):
             return nn.Sequential(nn.Conv2d(i, o, 3, 2, 1), nn.GroupNorm(8, o), nn.GELU())
 
-        self.net = nn.Sequential(blk(3, 32), blk(32, 64), blk(64, 96), blk(96, 128))
-        self.proj = nn.Linear(128, d_model)
+        self.net = nn.Sequential(*[blk(i, o) for i, o in zip([3, *chans[:-1]], chans, strict=True)])
+        self.proj = nn.Linear(chans[-1], d_model)
         self.d = d_model
 
     def forward(self, x):  # (B,3,H,W) in [0,1] -> (B,N,d)
@@ -69,6 +70,53 @@ class ImageEncoder(nn.Module):
         B, C, H, W = f.shape
         tok = self.proj(f.flatten(2).transpose(1, 2))
         return tok + sincos_2d(H, W, self.d, x.device)
+
+
+class PretrainedViT(nn.Module):
+    """Frozen pretrained ViT (default DINOv2-small, patch 14) -> patch tokens, plus a trainable adapter.
+
+    The backbone is loaded lazily onto the input's device and is *not* part of ``state_dict`` (like the frozen
+    text encoder); only the adapter is trained and checkpointed. Images are resized to a multiple of the patch size."""
+
+    MEAN, STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+
+    def __init__(self, name, d_model=128, input_size=224):
+        super().__init__()
+        from transformers import AutoConfig
+
+        self.name, self.d, self.input_size = name, d_model, input_size
+        cfg = AutoConfig.from_pretrained(name)
+        self.patch = int(getattr(cfg, "patch_size", 14))
+        self.adapter = nn.Sequential(nn.Linear(cfg.hidden_size, d_model), nn.LayerNorm(d_model))
+        self._bb: list = []  # held in a list so it is not registered as a submodule
+
+    def _backbone(self, device):
+        if not self._bb:
+            from transformers import AutoModel
+
+            m = AutoModel.from_pretrained(self.name).eval()
+            for p in m.parameters():
+                p.requires_grad_(False)
+            self._bb.append(m)
+        self._bb[0].to(device)
+        return self._bb[0]
+
+    def train(self, mode=True):
+        super().train(mode)
+        if self._bb:
+            self._bb[0].eval()  # the backbone stays in eval mode
+        return self
+
+    def forward(self, x):
+        side = max(self.patch, round(self.input_size / self.patch) * self.patch)
+        if x.shape[-2:] != (side, side):
+            x = F.interpolate(x, size=(side, side), mode="bilinear", align_corners=False, antialias=True)
+        mean = torch.tensor(self.MEAN, device=x.device).view(1, 3, 1, 1)
+        std = torch.tensor(self.STD, device=x.device).view(1, 3, 1, 1)
+        with torch.no_grad():
+            feats = self._backbone(x.device)(pixel_values=(x - mean) / std).last_hidden_state[:, 1:]  # drop CLS
+        g = side // self.patch
+        return self.adapter(feats) + sincos_2d(g, g, self.d, x.device)
 
 
 class TextEncoderModule(nn.Module):
@@ -142,6 +190,9 @@ class VLAPolicy(nn.Module):
         head="regress",
         flow_steps=8,
         text: TextConfig | dict | None = None,
+        patch=16,
+        vision="cnn",
+        vision_size=224,
     ):
         super().__init__()
         text = TextConfig(**text) if isinstance(text, dict) else (text or TextConfig())
@@ -151,8 +202,9 @@ class VLAPolicy(nn.Module):
         self.cfg = dict(
             cameras=list(cameras), proprio_dim=proprio_dim, arch=arch, chunk=chunk, window=window, hidden=hidden,
             d_model=d_model, head=head, flow_steps=flow_steps, text=vars(text).copy(),
+            patch=patch, vision=vision, vision_size=vision_size,
         )  # fmt: skip
-        self.img = ImageEncoder(d_model)
+        self.img = ImageEncoder(d_model, patch) if vision == "cnn" else PretrainedViT(vision, d_model, vision_size)
         self.cam_emb = nn.Parameter(torch.randn(len(cameras), 1, d_model) * 0.02)
         self.txt = TextEncoderModule(text, d_model)
         self.prop = nn.Linear(proprio_dim, d_model)

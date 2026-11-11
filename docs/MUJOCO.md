@@ -143,6 +143,23 @@ Control rate x fixed command latency (`python -m vla_mujoco.sweep_rate`, 30 `sta
 `data/collect.py` stores only successful episodes (npz: images, proprio, actions + privileged labels for auxiliary
 losses). `--noise` adds DART-style action noise to widen state coverage.
 
+## Image resolution
+The policy sees a **square** image of side `img_size`. The simulator can render at any native size and letterbox it:
+`EnvConfig(img_size=224, render_hw=(480, 640))` (CLI: `--img-size 224 --render-hw 480 640`; 1080p is `1080 1920`) renders
+640x480 and resizes preserving the aspect ratio, padding black bars. The grounding labels (`ref_uv`) are mapped through the
+same projection and letterbox, so they stay correct. Checkpoints store the training image setup and `vla-eval` reuses it.
+
+| choice | token grid | notes |
+|---|---|---|
+| `--img-size 64 --patch 16` | 4x4 | what the first CPU experiments used (too coarse: objects are a few pixels) |
+| `--img-size 128 --patch 8` | 16x16 | cheap, finer grid |
+| `--img-size 224 --patch 16` | 14x14 | recommended starting point |
+| `--vision facebook/dinov2-small` | 16x16 at 224 | frozen pretrained ViT (patch 14) + trainable adapter, not stored in the checkpoint |
+
+Render time is flat up to ~256 px (~15 ms/frame, software) and ~3x higher at 480x640; storage is the real cost
+(300 episodes x 150 steps x 2 cameras: 1 GB at 64 px, 13 GB at 224 px, 83 GB at 480x640 raw), so store at the model
+resolution and keep native rendering for when detail matters (e.g. the wrist camera).
+
 ## Policy (`vla/policy.py`, `vla/text.py`, `vla/train.py`, `vla/evaluate.py`)
 ```
 cameras -> CNN -> patch tokens --+

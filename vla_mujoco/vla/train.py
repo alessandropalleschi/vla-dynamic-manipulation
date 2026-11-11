@@ -202,6 +202,13 @@ def main():
     ap.add_argument("--text-encoder", choices=["bow", "scratch", "pretrained"], default="pretrained")
     ap.add_argument("--text-name", default=DEFAULT_PRETRAINED)
     ap.add_argument("--cameras", nargs="+", default=["front", "wrist"])
+    ap.add_argument(
+        "--vision", default="cnn", help="cnn | a Hugging Face ViT name, e.g. facebook/dinov2-small (frozen)"
+    )
+    ap.add_argument(
+        "--patch", type=int, default=16, choices=[8, 16, 32], help="CNN patch stride (token grid = size/patch)"
+    )
+    ap.add_argument("--vision-size", type=int, default=224, help="input side for a pretrained ViT (resized)")
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--seq", type=int, default=24)
@@ -236,6 +243,7 @@ def main():
 
     # ---- data + text
     eps = load_data(a.data, a.cameras, a.max_eps)
+    env_cfg = json.loads((Path(a.data) / "config.json").read_text()) if (Path(a.data) / "config.json").exists() else {}
     order = np.random.default_rng(0).permutation(len(eps))
     n_val = max(1, int(round(len(eps) * a.val_frac))) if len(eps) > 4 else 0
     val_eps = [eps[i] for i in order[:n_val]] or [eps[0]]
@@ -320,7 +328,14 @@ def main():
             if v["act_l1"] < best:
                 best = v["act_l1"]
                 torch.save(
-                    {"model": ema.shadow.state_dict(), "cfg": model.cfg, "args": vars(a), "step": step}, out / "best.pt"
+                    {
+                        "model": ema.shadow.state_dict(),
+                        "cfg": model.cfg,
+                        "env_cfg": env_cfg,
+                        "args": vars(a),
+                        "step": step,
+                    },
+                    out / "best.pt",
                 )
             torch.save(
                 {"model": ema.shadow.state_dict(), "raw": model.state_dict(), "opt": opt.state_dict(), "cfg": model.cfg,
@@ -367,7 +382,8 @@ def main():
             log_f.flush()
     pre.close()
     torch.save(
-        {"model": ema.shadow.state_dict(), "cfg": model.cfg, "args": vars(a), "step": a.steps}, out / "policy.pt"
+        {"model": ema.shadow.state_dict(), "cfg": model.cfg, "env_cfg": env_cfg, "args": vars(a), "step": a.steps},
+        out / "policy.pt",
     )
     (out / "train_args.json").write_text(json.dumps(vars(a), indent=1))
     print("saved", out / "policy.pt", "(final EMA) and", out / "best.pt")

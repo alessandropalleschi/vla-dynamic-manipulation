@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import json
 import time
 from pathlib import Path
 
@@ -104,6 +105,11 @@ def main():
     ap.add_argument("--text-encoder", choices=["bow", "scratch", "pretrained"], default="pretrained")
     ap.add_argument("--text-name", default=DEFAULT_PRETRAINED)
     ap.add_argument("--cameras", nargs="+", default=["front", "wrist"])
+    ap.add_argument(
+        "--vision", default="cnn", help="cnn | a Hugging Face ViT name, e.g. facebook/dinov2-small (frozen)"
+    )
+    ap.add_argument("--patch", type=int, default=16, choices=[8, 16, 32])
+    ap.add_argument("--vision-size", type=int, default=224)
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=5e-4)
@@ -146,10 +152,14 @@ def main():
         t = sid[torch.as_tensor(j)]
         return {k: (v[t].to(dev) if v is not None else None) for k, v in enc.items()}
 
-    grid = 4
+    side = imgs[0].shape[1]
+    grid = side // a.patch if a.vision == "cnn" else round(a.vision_size / 14)
+    env_cfg = json.loads((Path(a.data) / "config.json").read_text()) if (Path(a.data) / "config.json").exists() else {}
     prior = prior_accuracy(uv[tr_idx], vis[tr_idx], uv[val_idx], vis[val_idx], grid)
     print(f"location-prior baseline (most frequent patch per camera/role): {prior:.3f}   chance: {1 / grid**2:.3f}")
-    model = VLAPolicy(a.cameras, arch="mlp", text=backend.cfg).to(dev)
+    model = VLAPolicy(
+        a.cameras, arch="mlp", text=backend.cfg, patch=a.patch, vision=a.vision, vision_size=a.vision_size
+    ).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=1e-4)
     ema = EMA(model, a.ema)
     out = Path(a.out)
@@ -192,7 +202,13 @@ def main():
                           f"{gap:.4f}", f"{m['pick_acc']:.4f}", f"{m['support_acc']:.4f}", f"{prior:.4f}",
                           f"{time.time() - t0:.0f}"])  # fmt: skip
             log_f.flush()
-            ck = {"model": copy.deepcopy(ema.shadow.state_dict()), "cfg": model.cfg, "args": vars(a), "step": step}
+            ck = {
+                "model": copy.deepcopy(ema.shadow.state_dict()),
+                "cfg": model.cfg,
+                "env_cfg": env_cfg,
+                "args": vars(a),
+                "step": step,
+            }
             torch.save(ck, out / "policy.pt")
             if m["acc"] > best:
                 best = m["acc"]

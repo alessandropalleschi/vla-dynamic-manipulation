@@ -10,6 +10,7 @@ location of the pick object and the support in every camera (``ref_uv`` / ``ref_
 from __future__ import annotations
 
 import argparse
+import json
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -20,8 +21,8 @@ from ..sim.env import DynamicStackEnv, EnvConfig
 
 
 def make_shard(args):
-    shard, n, seed0, img_size, cameras = args
-    env = DynamicStackEnv(EnvConfig(seed=seed0, img_size=img_size, cameras=cameras, task="random"))
+    shard, n, seed0, img_size, cameras, render_hw = args
+    env = DynamicStackEnv(EnvConfig(seed=seed0, img_size=img_size, render_hw=render_hw, cameras=cameras, task="random"))
     rng = np.random.default_rng(seed0 + 10_000_019)
     imgs = {c: [] for c in cameras}
     uv, vis, instr, kind = [], [], [], []
@@ -50,13 +51,18 @@ def main():
     ap.add_argument("--per-shard", type=int, default=500)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--img-size", type=int, default=64)
+    ap.add_argument(
+        "--render-hw", type=int, nargs=2, default=None, metavar=("H", "W"), help="native render size, letterboxed"
+    )
     ap.add_argument("--seed0", type=int, default=1_000_000)
     ap.add_argument("--cameras", nargs="+", default=["front", "wrist"])
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    (out / "config.json").write_text(json.dumps({"img_size": a.img_size, "render_hw": a.render_hw}))
     n_shards = -(-a.scenes // a.per_shard)
-    jobs = [(i, min(a.per_shard, a.scenes - i * a.per_shard), a.seed0 + i * a.per_shard, a.img_size, tuple(a.cameras))
+    jobs = [(i, min(a.per_shard, a.scenes - i * a.per_shard), a.seed0 + i * a.per_shard, a.img_size, tuple(a.cameras),
+             tuple(a.render_hw) if a.render_hw else None)
             for i in range(n_shards)]  # fmt: skip
     with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
         for shard, data in ex.map(make_shard, jobs):

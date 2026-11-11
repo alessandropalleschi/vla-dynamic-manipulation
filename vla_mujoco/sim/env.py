@@ -33,6 +33,7 @@ import numpy as np
 
 from ..tasks.generator import generate
 from .entities import PALETTE  # noqa: F401  (re-exported)
+from .imaging import letterbox, letterbox_geometry
 from .randomize import DomainRandomizer
 from .scene import BELT_TOP, CUP_R, CUP_XY, N_OBJ, build_mjcf
 
@@ -53,7 +54,10 @@ HOME_Q = np.array([0.0, 0.0, -1.2, 0.0, 1.2, 0.0])  # refined at construction by
 @dataclass
 class EnvConfig:
     seed: int = 0
-    img_size: int = 128
+    img_size: int = 128  # side of the (square) image the policy sees
+    render_hw: tuple | None = (
+        None  # native render size (H, W), e.g. (480, 640) or (1080, 1920); letterboxed to img_size
+    )
     cameras: tuple = ("front", "wrist")
     control_hz: float = 20.0
     max_time_s: float = 22.0
@@ -109,7 +113,8 @@ def _yaw_rot(yaw: float) -> np.ndarray:
 class DynamicStackEnv:
     def __init__(self, cfg: EnvConfig | None = None):
         self.cfg = cfg or EnvConfig()
-        self.model = mujoco.MjModel.from_xml_string(build_mjcf(self.cfg.img_size))
+        self.render_hw = tuple(self.cfg.render_hw) if self.cfg.render_hw else (self.cfg.img_size, self.cfg.img_size)
+        self.model = mujoco.MjModel.from_xml_string(build_mjcf(*self.render_hw))
         self.data = mujoco.MjData(self.model)
         self._ik = mujoco.MjData(self.model)
         m = self.model
@@ -132,7 +137,7 @@ class DynamicStackEnv:
         self.act_delay_steps = 0
         self.obs_delay_steps = 0
         self.belt_dir = np.array([0.0, 1.0])
-        self.renderer = mujoco.Renderer(m, self.cfg.img_size, self.cfg.img_size) if self.cfg.render else None
+        self.renderer = mujoco.Renderer(m, *self.render_hw) if self.cfg.render else None
         self.home_q = self._solve_home()
         self.home_tcp = self._fk(self.home_q)[0]
         self.reset(seed=self.cfg.seed)
@@ -526,7 +531,7 @@ class DynamicStackEnv:
         if self.renderer:
             for c in self.cfg.cameras:
                 self._frames[c].append(self.render(c))
-                imgs[c] = self._sensor(self._frames[c][0])  # oldest kept frame = obs_delay_steps old
+                imgs[c] = self._sensor(letterbox(self._frames[c][0], self.cfg.img_size))  # oldest frame = delayed
         return {"images": imgs, "proprio": self.proprio(), "instruction": self.instruction}
 
     def project(self, point, camera: str):
@@ -537,9 +542,14 @@ class DynamicStackEnv:
         pc = R.T @ (np.asarray(point, float) - d.cam_xpos[cid])  # camera looks along -z, x right, y up
         if pc[2] >= -1e-6:
             return np.array([0.5, 0.5]), False
-        f = 0.5 / math.tan(math.radians(m.cam_fovy[cid]) / 2)
-        uv = np.array([0.5 + f * pc[0] / -pc[2], 0.5 - f * pc[1] / -pc[2]])
-        return uv, bool(0.0 <= uv[0] < 1.0 and 0.0 <= uv[1] < 1.0)
+        h, w = self.render_hw
+        t = math.tan(math.radians(m.cam_fovy[cid]) / 2)  # fovy is the vertical field of view
+        u = 0.5 + 0.5 * (pc[0] / -pc[2]) / (t * w / h)
+        v = 0.5 - 0.5 * (pc[1] / -pc[2]) / t
+        visible = bool(0.0 <= u < 1.0 and 0.0 <= v < 1.0)
+        nh, nw, top, left = letterbox_geometry(h, w, self.cfg.img_size)  # map into the letterboxed model input
+        size = self.cfg.img_size
+        return np.array([(left + u * nw) / size, (top + v * nh) / size]), visible
 
     def _entity_state(self, name):
         e = self.ent[name]

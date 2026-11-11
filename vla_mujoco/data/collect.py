@@ -85,7 +85,9 @@ def main():
     ap.add_argument("--episodes", type=int, default=50)
     ap.add_argument("--seed0", type=int, default=0)
     ap.add_argument("--workers", type=int, default=2)
-    ap.add_argument("--img-size", type=int, default=96)
+    ap.add_argument("--img-size", type=int, default=96, help="side of the square image stored / seen by the policy")
+    ap.add_argument("--render-hw", type=int, nargs=2, default=None, metavar=("H", "W"),
+                    help="native render size, letterboxed to --img-size (e.g. 480 640 or 1080 1920)")  # fmt: skip
     ap.add_argument("--noise", type=float, default=0.0, help="expert action noise (DART-style)")
     ap.add_argument("--speed-range", type=float, nargs=2, default=(0.02, 0.07))
     ap.add_argument("--speed-change", action="store_true")
@@ -98,6 +100,7 @@ def main():
     a = ap.parse_args()
     cfg = dict(
         img_size=a.img_size,
+        render_hw=tuple(a.render_hw) if a.render_hw else None,
         belt_speed_range=tuple(a.speed_range),
         speed_change=a.speed_change,
         occlusion_s=a.occlusion_s,
