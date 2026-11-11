@@ -86,11 +86,14 @@ belief-conditioned flow-matching policy design is in [`docs/TASK_AND_POLICY_DESI
 ## Development
 
 ```bash
+make hooks     # once per clone (make install does it too): git pre-commit hooks
 make lint      # ruff check + format check (legacy scripts/ is excluded)
 make format
 make test
 ```
-CI (`.github/workflows/ci.yml`) runs lint and tests on every push. VS Code tasks/launch configs for demo, collection,
+The **pre-commit hooks** reject files over 1 MB and any checkpoint, dataset, recording or `runs*/` / `data/` output
+(`.pre-commit-config.yaml`; vendored `external/` assets are exempt), so training artifacts cannot be committed by accident.
+CI (`.github/workflows/ci.yml`) runs the same hooks and the tests on every push. VS Code tasks/launch configs for demo, collection,
 training and evaluation are in `.vscode/`.
 
 ## Legacy Gazebo / ROS 2 stack

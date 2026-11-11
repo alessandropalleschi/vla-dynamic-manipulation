@@ -12,7 +12,7 @@ dependencies = ["mujoco>=3.2", "numpy", "pillow"]
 
 [project.optional-dependencies]
 train = ["torch"]                 # CPU build is enough for smoke runs; install a CUDA build for real training
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "pre-commit"]
 
 [project.scripts]
 vla-collect = "vla_mujoco.data.collect:main"

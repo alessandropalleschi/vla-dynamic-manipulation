@@ -1,0 +1,28 @@
+# Install once per clone:  pip install pre-commit && pre-commit install   (or: make hooks)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        name: block large files (> 1 MB)
+        args: ["--maxkb=1000"]
+        exclude: ^external/  # vendored third-party assets (meshes) are committed on purpose
+      - id: check-merge-conflict
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(vla_mujoco|tests)/
+      - id: ruff-format
+        files: ^(vla_mujoco|tests)/
+  - repo: local
+    hooks:
+      - id: no-artifacts
+        name: block checkpoints, datasets, recordings and run outputs
+        language: fail
+        entry: >-
+          Training/data artifacts must not be committed (they belong in the git-ignored runs*/ and data/ folders,
+          or in git-lfs / an artifact store). If this file is genuinely source, rename it or adjust .pre-commit-config.yaml.
+        files: '^(runs[^/]*|data)/|\.(pt|pth|ckpt|safetensors|npz|npy|h5|hdf5|mp4|gif)$'
+        exclude: '^(external/|data/\.gitkeep$|data/uf850_hover_plan\.json$)'

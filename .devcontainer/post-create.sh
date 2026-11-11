@@ -19,6 +19,7 @@ else
   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 fi
 python -m pip install -e ".[dev]"
+python -m pre_commit install   # large-file / artifact guard + ruff on every commit
 python -m pytest
 python -m vla_mujoco.gpu_check || echo "(no usable CUDA device - training will fall back to CPU)"
 echo "Ready. Try:  make demo"

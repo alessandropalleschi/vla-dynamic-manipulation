@@ -1,12 +1,16 @@
-.PHONY: install test lint format gpu-check demo collect train eval-expert clean
+.PHONY: install hooks test lint format gpu-check demo collect train eval-expert clean
 PY ?= python3
 export MUJOCO_GL ?= egl
 
-install:            ## editable install with training + dev extras
+install:            ## editable install with training + dev extras, plus git hooks
 	$(PY) -m pip install -e ".[train,dev]"
+	$(PY) -m pre_commit install
 
 gpu-check:          ## CUDA + GPU (EGL) rendering sanity check
 	$(PY) -m vla_mujoco.gpu_check
+
+hooks:              ## install the git pre-commit hooks (large-file / artifact guard, ruff)
+	$(PY) -m pre_commit install
 
 test:               ## fast simulator tests (no GPU, no rendering)
 	$(PY) -m pytest
