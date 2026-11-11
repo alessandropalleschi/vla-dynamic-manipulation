@@ -167,8 +167,8 @@ checkpoints record the hardware they were trained on and `vla-eval` / DAgger reb
   relative to the straight-down view, so models are not interchangeable between the two. A smaller tilt needs a higher
   mount (about 1.6 m for 15 deg).
 
-CLI: `--wrist-mount oak --overhead-view front --cameras front wrist overhead` for `vla-collect`,
-`python -m vla_mujoco.data.static_scenes` and `vla-eval`; `make data DATA=data_oak CAMS="front wrist overhead"
+CLI: `--wrist-mount oak --overhead-view front --cameras wrist overhead` for `vla-collect`,
+`python -m vla_mujoco.data.static_scenes` and `vla-eval`; `make data DATA=data_oak CAMS="wrist overhead"
 HW="--wrist-mount oak --overhead-view front"` rebuilds everything for the new hardware in its own directory.
 Regenerate the meshes with `sim/assets/adapter/build_adapter.py` and `sim/assets/oak_d_pro/prep_mesh.py`
 (build-time deps only: trimesh, shapely, mapbox-earcut, fast-simplification, rtree).

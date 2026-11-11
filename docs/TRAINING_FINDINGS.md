@@ -124,5 +124,5 @@ checks must not be pooled as independent episodes. The handoff also reports a se
 median closest approach 2.4 cm and 1/12 complete tasks; that diagnostic is not the stage evaluation.
 
 The next experiment regenerates scenes and demos with the OAK wrist mount and front-facing overhead camera,
-using front, wrist and overhead RGB at 128 px. Its closed-loop performance is not yet known. The old datasets and
+using wrist and overhead RGB at 128 px (two physical cameras, clarified by the user). Its closed-loop performance is not yet known. The old datasets and
 checkpoints remain available for comparison.

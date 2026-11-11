@@ -32,7 +32,7 @@ SCENES ?= 50000
 EPISODES ?= 600
 DATA ?= data
 # Hardware variant, e.g. the OAK-D Pro wrist camera on the flange adapter plate + the top camera beyond the belt:
-#   make data DATA=data_oak CAMS="front wrist overhead" HW="--wrist-mount oak --overhead-view front"
+#   make data DATA=data_oak CAMS="wrist overhead" HW="--wrist-mount oak --overhead-view front"
 CAMS ?= front wrist
 HW ?=
 

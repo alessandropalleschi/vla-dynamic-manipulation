@@ -83,13 +83,14 @@ Evidence gathered:
 ## 6. Next steps, in order
 1. `pytest` + lint; commit (two groups, see 3). Co-author trailer is fine.
 2. Rebuild data for the new hardware in its own directory (~10 min total, GPU rendering):
-   `make data DATA=data_oak CAMS="front wrist overhead" HW="--wrist-mount oak --overhead-view front"`
+   `make data DATA=data_oak CAMS="wrist overhead" HW="--wrist-mount oak --overhead-view front"`
    (50k scenes + 600 demos at 128 px). Existing `data/` was rendered with the *old* hardware (no adapter, old camera).
-3. Re-run the pipeline on it (three cameras change `cam_emb`/`slot_proj` shapes, so `--init` from old checkpoints is partial):
+3. Re-run the pipeline on it with the user-confirmed two cameras: OAK `wrist` + repositioned `overhead`.
+   The camera count matches the old setup but identities and views differ; pretrain fresh rather than reuse old camera embeddings:
    `python -m vla_mujoco.vla.pretrain_grounding --data data_oak/scenes --out runs/ground_oak --text-encoder pretrained
-   --patch 8 --cameras front wrist overhead --steps 10000 --batch 64 --amp` (~8 min), then
+   --patch 8 --cameras wrist overhead --steps 10000 --batch 64 --amp` (~8 min), then
    `python -m vla_mujoco.vla.train --data data_oak/mj_demos --out runs/ft_oak --arch gru --head flow --text-encoder pretrained
-   --patch 8 --slots --cameras front wrist overhead --init runs/ground_oak/best.pt --steps 6000 --batch 16 --seq 24
+   --patch 8 --slots --cameras wrist overhead --init runs/ground_oak/best.pt --steps 6000 --batch 16 --seq 24
    --burn-in 6 --lr 3e-4 --amp --decision-w 1 --val-every 500` (~18 min), then the probe, then
    `python -m vla_mujoco.vla.dagger --init runs/ft_oak/policy.pt --base-data data_oak/mj_demos --data-out data_oak/dagger
    --out runs/dagger_oak --stages s0_static_pick` (rollouts take their hardware from the checkpoint's recorded dataset config).
