@@ -25,7 +25,8 @@
         "tamasfe.even-better-toml",
         "ms-vscode.makefile-tools",
         "github.vscode-github-actions",
-        "ms-iot.vscode-ros"
+        "ms-iot.vscode-ros",
+        "anthropic.claude-code"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
@@ -55,5 +56,16 @@
   ],
   "hostRequirements": {
     "gpu": "optional"
+  },
+  "initializeCommand": "bash .devcontainer/init-host.sh",
+  "mounts": [
+    "source=${localEnv:HOME}/.claude-${localEnv:VLA_DEV_PROFILE:vla_dev},target=/home/vscode/.claude,type=bind",
+    "source=${localEnv:HOME}/.claude-${localEnv:VLA_DEV_PROFILE:vla_dev}.json,target=/home/vscode/.claude.json,type=bind",
+    "source=${localEnv:HOME}/.codex-${localEnv:VLA_DEV_PROFILE:vla_dev},target=/home/vscode/.codex,type=bind"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
   }
 }

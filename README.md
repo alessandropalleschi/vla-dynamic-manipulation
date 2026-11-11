@@ -28,6 +28,14 @@ Both install Python 3.12, all dependencies and the recommended extensions, **act
 guard, ruff, Git LFS; the setup fails loudly if they are not active), then run the tests and `make gpu-check`.
 Without VS Code: `docker compose -f compose.mujoco.yaml run --rm mujoco` gives a GPU shell.
 
+**Claude Code and Codex in the container.** Both profiles install the Claude Code VS Code extension and the `claude` and
+`codex` CLIs (via Node, from the `node` dev-container feature). Their logins and settings **persist across rebuilds**: before the
+container starts, `.devcontainer/init-host.sh` creates `~/.claude-vla_dev/`, `~/.claude-vla_dev.json` and `~/.codex-vla_dev/` on the
+host (private permissions), and they are bind-mounted onto `~/.claude`, `~/.claude.json` and `~/.codex` in the container. Log in
+once inside the container (`claude`, `codex login`). Set `VLA_DEV_PROFILE` on the host to keep separate identities
+(default `vla_dev`); API keys can be passed with `remoteEnv` if you prefer them to a login. The host must have `bash`
+(Linux/macOS).
+
 **Local:**
 ```bash
 python -m venv .venv && source .venv/bin/activate

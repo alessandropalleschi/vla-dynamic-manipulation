@@ -8,6 +8,7 @@
     "redhat.vscode-yaml",
     "tamasfe.even-better-toml",
     "ms-vscode.makefile-tools",
+    "anthropic.claude-code",
     "ms-vscode-remote.remote-containers"
   ]
 }
