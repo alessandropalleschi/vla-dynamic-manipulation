@@ -29,7 +29,21 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
     env = DynamicStackEnv(cfg)
     obs, info = env.reset(seed=seed)
     ex = StackExpert(env, seed=seed, noise=noise)
-    rec = {k: [] for k in ["proprio", "action", "tgt_pos", "tgt_vel_y", "src_pos", "occluded", "phase", "step"]}
+    rec = {
+        k: []
+        for k in [
+            "proprio",
+            "action",
+            "tgt_pos",
+            "tgt_vel_y",
+            "src_pos",
+            "occluded",
+            "phase",
+            "step",
+            "ref_uv",
+            "ref_vis",
+        ]
+    }
     imgs = {c: [] for c in cfg.cameras}
     success = False
     for _ in range(int(cfg.max_time_s * cfg.control_hz)):
@@ -45,6 +59,8 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
         rec["occluded"].append(P["occluded"])
         rec["phase"].append(PHASES.index(ex.phase))
         rec["step"].append(P["step"])
+        rec["ref_uv"].append(P["ref_uv"])
+        rec["ref_vis"].append(P["ref_vis"])
         obs, _, term, trunc, info = env.step(a)
         success = info["success"]
         if term or trunc:
@@ -55,6 +71,7 @@ def run_episode(seed: int, cfg_kwargs: dict, noise: float):
     out["instruction"] = np.array(obs["instruction"])
     out["subgoals"] = np.array([st.text for st in env.task.steps])
     out["task_kind"] = np.array(env.task.kind)
+    out["cameras"] = np.array(cfg.cameras)
     return seed, success, out
 
 

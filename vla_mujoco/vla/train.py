@@ -44,6 +44,10 @@ def load_data(path, cameras, max_eps=None):
                 aux=aux,
                 phase=z["phase"].astype(np.int64) if "phase" in z else np.zeros(T, np.int64),
                 step=np.minimum(z["step"], N_STEPS - 1).astype(np.int64) if "step" in z else np.zeros(T, np.int64),
+                ref_uv=z["ref_uv"].astype(np.float32)
+                if "ref_uv" in z
+                else np.zeros((T, len(cameras), 2, 2), np.float32),
+                ref_vis=z["ref_vis"] if "ref_vis" in z else np.zeros((T, len(cameras), 2), bool),
                 instr=str(z["instruction"]),
                 T=T,
             )
@@ -60,7 +64,7 @@ class Batcher:
 
     def make(self, B, rng):
         imgs = [[] for _ in self.eps[0]["img"]]
-        keys = ("proprio", "aux", "phase", "step")
+        keys = ("proprio", "aux", "phase", "step", "ref_uv", "ref_vis")
         cols = {k: [] for k in keys}
         tgt, tid = [], []
         for _ in range(B):
@@ -81,6 +85,8 @@ class Batcher:
             "aux": t(np.stack(cols["aux"])).float(),
             "phase": t(np.stack(cols["phase"])).clamp(max=N_PHASES - 1),
             "step": t(np.stack(cols["step"])),
+            "ref_uv": t(np.stack(cols["ref_uv"])).float(),
+            "ref_vis": t(np.stack(cols["ref_vis"])),
             "target": t(np.stack(tgt)).float(),
             "tid": torch.tensor(tid),
         }
@@ -153,7 +159,10 @@ def lr_at(step, total, base, warmup):
 def validate(model, batcher, rng, n_batches, B, burn_in, amp):
     """Validation metrics with EMA weights, including the language probe (wrong-instruction error)."""
     model.eval()
-    m = {k: [] for k in ("act_l1", "act_l1_wrong", "vac_acc", "aux", "phase_acc", "step_acc")}
+    m = {
+        k: []
+        for k in ("act_l1", "act_l1_wrong", "vac_acc", "aux", "phase_acc", "step_acc", "ground_acc", "ground_acc_wrong")
+    }
     with torch.random.fork_rng():
         torch.manual_seed(1234)
         for _ in range(n_batches):
@@ -161,8 +170,8 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
             dev_t = {k: (v.to(batcher.dev) if v is not None else None) for k, v in batcher.text_for(b["tid"]).items()}
             wrong = batcher.text_for(torch.roll(b["tid"], 1))
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
-                z, _ = model.features(b["imgs"], b["proprio"], dev_t)
-                zw, _ = model.features(b["imgs"], b["proprio"], wrong)
+                z, _, gl = model.features(b["imgs"], b["proprio"], dev_t, ground=True)
+                zw, _, glw = model.features(b["imgs"], b["proprio"], wrong, ground=True)
             sl = slice(burn_in, None)
             tgt = b["target"][:, sl]
             ch = model.sample_chunk(z[:, sl].float())
@@ -170,11 +179,15 @@ def validate(model, batcher, rng, n_batches, B, burn_in, amp):
             m["act_l1"].append(float((ch[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean()))
             m["act_l1_wrong"].append(float((chw[..., :CONT_DIM] - tgt[..., :CONT_DIM]).abs().mean()))
             m["vac_acc"].append(float(((ch[..., CONT_DIM] > 0.5) == (tgt[..., CONT_DIM] > 0.5)).float().mean()))
+            sl_uv, sl_vis = b["ref_uv"][:, sl], b["ref_vis"][:, sl]
+            m["ground_acc"].append(float(model.ground_terms([g.float()[:, sl] for g in gl], sl_uv, sl_vis)[1]))
+            m["ground_acc_wrong"].append(float(model.ground_terms([g.float()[:, sl] for g in glw], sl_uv, sl_vis)[1]))
             m["aux"].append(float(torch.nn.functional.smooth_l1_loss(model.aux(z[:, sl]), b["aux"][:, sl])))
             m["phase_acc"].append(float((model.aux_phase(z[:, sl]).argmax(-1) == b["phase"][:, sl]).float().mean()))
             m["step_acc"].append(float((model.aux_step(z[:, sl]).argmax(-1) == b["step"][:, sl]).float().mean()))
     out = {k: float(np.mean(v)) for k, v in m.items()}
     out["lang_gap"] = out["act_l1_wrong"] - out["act_l1"]
+    out["ground_gap"] = out["ground_acc"] - out["ground_acc_wrong"]  # accuracy lost when the text is wrong
     model.train()
     return out
 
@@ -198,6 +211,7 @@ def main():
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--ema", type=float, default=0.999)
     ap.add_argument("--aux-w", type=float, default=1.0)
+    ap.add_argument("--ground-w", type=float, default=1.0, help="weight of the patch-grounding loss (0 = off)")
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--val-every", type=int, default=250)
     ap.add_argument("--val-batches", type=int, default=8)
@@ -268,7 +282,7 @@ def main():
     if start == 0:
         log.writerow(
             ["step", "lr", "loss", "act", "vac", "aux", "phase", "step_cls", "val_act_l1", "val_act_l1_wrong",
-             "lang_gap", "val_vac_acc", "val_phase_acc", "val_step_acc", "sec"]
+             "lang_gap", "val_vac_acc", "val_phase_acc", "val_step_acc", "ground_acc", "ground_acc_wrong", "sec"]
         )  # fmt: skip
     best = float("inf")
     t0 = time.time()
@@ -279,12 +293,15 @@ def main():
         b = pre.get()
         txt = tb.text_for(b["tid"])
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
-            z, _ = model.features(augment(b["imgs"]), b["proprio"], txt)
+            z, _, gl = model.features(augment(b["imgs"]), b["proprio"], txt, ground=True)
         z = z.float()
         sl = slice(a.burn_in, None)
         lt = model.loss_terms(z[:, sl], b["target"][:, sl])
         at = model.aux_terms(z[:, sl], b["aux"][:, sl], b["phase"][:, sl], b["step"][:, sl])
+        gl = [g.float()[:, sl] for g in gl]
+        g_loss, g_acc = model.ground_terms(gl, b["ref_uv"][:, sl], b["ref_vis"][:, sl])
         loss = lt["act"] + 0.3 * lt["vac"] + a.aux_w * at["aux"] + 0.2 * at["phase"] + 0.2 * at["step"]
+        loss = loss + a.ground_w * g_loss
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -306,16 +323,27 @@ def main():
             )  # fmt: skip
             print(
                 f"  [val @ {step}] act_l1 {v['act_l1']:.4f}  wrong-text {v['act_l1_wrong']:.4f}  "
-                f"lang_gap {v['lang_gap']:+.4f}  vac_acc {v['vac_acc']:.3f}  phase_acc {v['phase_acc']:.3f}",
+                f"lang_gap {v['lang_gap']:+.4f}  ground_acc {v['ground_acc']:.3f} "
+                f"(wrong-text {v['ground_acc_wrong']:.3f})  vac_acc {v['vac_acc']:.3f}  phase_acc {v['phase_acc']:.3f}",
                 flush=True,
             )
         if step % 25 == 0 or step == 1 or row is not None:
             print(
                 f"step {step:6d} loss {loss.item():.4f} act {lt['act'].item():.4f} vac {lt['vac'].item():.4f} "
-                f"aux {at['aux'].item():.4f} phase {at['phase'].item():.3f}  {time.time() - t0:.0f}s",
+                f"aux {at['aux'].item():.4f} phase {at['phase'].item():.3f} "
+                f"ground {g_loss.item():.3f} (acc {g_acc.item():.2f})  {time.time() - t0:.0f}s",
                 flush=True,
             )
-            val_cols = ("act_l1", "act_l1_wrong", "lang_gap", "vac_acc", "phase_acc", "step_acc")
+            val_cols = (
+                "act_l1",
+                "act_l1_wrong",
+                "lang_gap",
+                "vac_acc",
+                "phase_acc",
+                "step_acc",
+                "ground_acc",
+                "ground_acc_wrong",
+            )
             train_cols = [
                 loss.item(),
                 lt["act"].item(),

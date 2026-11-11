@@ -529,6 +529,18 @@ class DynamicStackEnv:
                 imgs[c] = self._sensor(self._frames[c][0])  # oldest kept frame = obs_delay_steps old
         return {"images": imgs, "proprio": self.proprio(), "instruction": self.instruction}
 
+    def project(self, point, camera: str):
+        """World point -> normalised image coords (u right, v down in [0, 1]) and whether it is visible."""
+        m, d = self.model, self.data
+        cid = m.camera(camera).id
+        R = d.cam_xmat[cid].reshape(3, 3)
+        pc = R.T @ (np.asarray(point, float) - d.cam_xpos[cid])  # camera looks along -z, x right, y up
+        if pc[2] >= -1e-6:
+            return np.array([0.5, 0.5]), False
+        f = 0.5 / math.tan(math.radians(m.cam_fovy[cid]) / 2)
+        uv = np.array([0.5 + f * pc[0] / -pc[2], 0.5 - f * pc[1] / -pc[2]])
+        return uv, bool(0.0 <= uv[0] < 1.0 and 0.0 <= uv[1] < 1.0)
+
     def _entity_state(self, name):
         e = self.ent[name]
         p, R = self.entity_pose(name)
@@ -550,10 +562,14 @@ class DynamicStackEnv:
         step = self.task.current_step(self)
         cur = self.task.steps[min(step, len(self.task.steps) - 1)]
         ents = {n: self._entity_state(n) for n in self.ent}
+        # image-space location of the objects the instruction refers to (pick, support) in every camera
+        ref = [[self.project(ents[o]["pos"], c) for o in (cur.obj, cur.onto)] for c in self.cfg.cameras]
         return {
             "t": self.t,
             "priv": {
                 "entities": ents,
+                "ref_uv": np.array([[uv for uv, _ in cam] for cam in ref], dtype=np.float32),  # (cams, 2, 2)
+                "ref_vis": np.array([[v for _, v in cam] for cam in ref]),  # (cams, 2)
                 "steps": [(s.obj, s.onto) for s in self.task.steps],
                 "step": step,
                 "subgoal": self.task.steps[min(step, len(self.task.steps) - 1)].text,

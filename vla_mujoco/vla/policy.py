@@ -171,11 +171,14 @@ class VLAPolicy(nn.Module):
         self.aux = nn.Sequential(nn.Linear(hidden, 64), nn.GELU(), nn.Linear(64, AUX_DIM))
         self.aux_phase = nn.Linear(hidden, N_PHASES)
         self.aux_step = nn.Linear(hidden, N_STEPS)
+        # referring-expression grounding: per image patch, is this where the instructed object (pick / support) is?
+        self.g_pick = nn.Linear(d_model, 1)
+        self.g_sup = nn.Linear(d_model, 1)
         self.register_buffer("p_mean", torch.zeros(proprio_dim))
         self.register_buffer("p_std", torch.ones(proprio_dim))
 
     # ------------------------------------------------------------------ belief
-    def features(self, imgs, proprio, text, h0=None):
+    def features(self, imgs, proprio, text, h0=None, ground=False):
         """imgs: list over cameras of (B,T,3,H,W); proprio (B,T,P); text: dict from TextBackend (B,...)."""
         B, T = proprio.shape[:2]
         toks = []
@@ -189,14 +192,25 @@ class VLAPolicy(nn.Module):
         seq = torch.cat([self.query.expand(B * T, -1, -1), p, *toks, txt], 1)
         n_pre = 2 + sum(t.shape[1] for t in toks)
         key_pad = torch.cat([torch.zeros(B * T, n_pre, dtype=torch.bool, device=seq.device), pad], 1)
-        x = self.out_norm(self.fusion(seq, src_key_padding_mask=key_pad)[:, 0]).view(B, T, -1)
+        out = self.out_norm(self.fusion(seq, src_key_padding_mask=key_pad))  # (B*T, S, d)
+        x = out[:, 0].reshape(B, T, -1)
+        gl, off = None, 2
+        if ground:  # logits over each camera's patches for [pick, support]: list of (B, T, 2, N)
+            gl = []
+            for t in toks:
+                n = t.shape[1]
+                patch = out[:, off : off + n]
+                off += n
+                gl.append(
+                    torch.stack([self.g_pick(patch).squeeze(-1), self.g_sup(patch).squeeze(-1)], 1).view(B, T, 2, n)
+                )
         if self.arch == "stack":  # concat the last `window` per-step features (first frame repeated)
             x = torch.cat([torch.cat([x[:, :1].repeat(1, k, 1), x], 1)[:, :T] for k in range(self.window)], -1)
         z = self.fuse(x)
         h = None
         if self.gru is not None:
             z, h = self.gru(z, h0)
-        return z, h
+        return (z, h, gl) if ground else (z, h)
 
     # ------------------------------------------------------------------- heads
     def loss_terms(self, z, target):
@@ -215,6 +229,28 @@ class VLAPolicy(nn.Module):
             "phase": F.cross_entropy(self.aux_phase(z).flatten(0, 1), phase_t.flatten()),
             "step": F.cross_entropy(self.aux_step(z).flatten(0, 1), step_t.flatten()),
         }
+
+    @staticmethod
+    def ground_terms(gl, ref_uv, ref_vis):
+        """Cross-entropy over patches against the patch containing the projected object centre (visible ones only).
+
+        gl: list per camera of (B, T, 2, N); ref_uv (B, T, cams, 2, 2) in [0, 1); ref_vis (B, T, cams, 2).
+        Returns (loss, accuracy)."""
+        loss, acc, cnt = 0.0, 0.0, 0.0
+        for c, lg in enumerate(gl):
+            n = lg.shape[-1]
+            g = int(round(n**0.5))
+            uv = ref_uv[:, :, c]  # (B, T, 2, 2)
+            col = (uv[..., 0] * g).floor().clamp(0, g - 1).long()
+            row = (uv[..., 1] * g).floor().clamp(0, g - 1).long()
+            idx = row * g + col
+            vis = ref_vis[:, :, c].float()
+            ce = F.cross_entropy(lg.flatten(0, 2), idx.flatten(), reduction="none").view_as(vis)
+            loss = loss + (ce * vis).sum()
+            acc = acc + ((lg.argmax(-1) == idx).float() * vis).sum()
+            cnt = cnt + vis.sum()
+        cnt = cnt.clamp(min=1.0)
+        return loss / cnt, acc / cnt
 
     @torch.no_grad()
     def sample_chunk(self, z):
