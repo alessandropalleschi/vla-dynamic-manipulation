@@ -10,9 +10,23 @@ the error with the correct one (0 = the text is ignored).
 | 1. original generator | 1200 | 0.046 / 0.046 / 0.051 | +0.0008 / +0.0013 / +0.0010 |
 | 2. roles placed at random belt positions, aux head also locates the pick object | 1500 | 0.054 / 0.050 / 0.051 | +0.0002 / +0.0007 / +0.0001 |
 
-Further probes (experiment 1 and 2): the action error on the first 12 steps of an episode (the arm has not moved, only the
+| 3. as 2, plus image-space grounding loss (`--ground-w 1`) | 1500 | 0.052 / 0.049 / 0.054 | +0.0020 / +0.0022 / -0.0002 |
+
+Further probes (experiments 1 and 2): the action error on the first 12 steps of an episode (the arm has not moved, only the
 text says which object is meant), and the auxiliary target-localisation error with right vs wrong text over the first
 8 frames. **All gaps are within +-0.006: none of the models used the instruction.**
+
+## Experiment 3: grounding supervision
+The grounding head (which image patch contains the object the instruction names) reaches 0.69-0.73 top-1 accuracy over the
+4x4 patch grid, but accuracy with a *wrong* instruction is the same (0.67-0.74, fluctuating around the right-text value with
+no consistent sign), for all three encoders. So the heads learn *where objects usually are for each role* (pick objects sit
+on the table, supports on the belt, plus position priors), not *which object the words describe*. The wiring is correct
+(unit tests show the text changes the belief); it simply has not been learned.
+
+Likely reason (hypothesis, not yet tested): **too few distinct (scene, instruction) pairs**. 288 training episodes are 288
+instructions, and learning "red", "second from the conveyor", "larger" from 288 examples at 64 px is a tiny compositional
+problem; the number of *frames* is large but they share the same instruction. Grounding needs thousands of distinct pairs,
+and those do not need trajectories.
 
 ## What this does and does not show
 * All encoders learn the motion structure (phase accuracy ~96 %, vacuum ~95 %) and localise targets far better than the
@@ -26,9 +40,10 @@ text says which object is meant), and the auxiliary target-localisation error wi
   (the policies were not good enough to be worth rolling out).
 
 ## Hypotheses and next steps (in order of expected payoff)
-1. **Direct grounding supervision in image space.** Add a head that predicts, over the patch tokens, which patch contains the
-   object named by the instruction (projected object centroids are available in the simulator). This is referring-expression
-   comprehension and gives the text a gradient that does not depend on the action loss. Compare the language gap with/without.
+1. **Grounding pre-training on static scenes (next).** Generate tens of thousands of scenes + instructions (reset + render only,
+   no expert rollout), train the language-conditioned grounding heads on them, then fine-tune on demonstrations. Success
+   criterion: ground accuracy with the right text clearly above wrong-text accuracy. (Direct image-space grounding
+   supervision, experiment 3, is already implemented.)
 2. **Weight the loss on decision frames** (start of approach / transfer, where the goal is not yet implied by the arm's own
    motion). Teacher-forced action loss is dominated by frames where the proprioceptive velocity already reveals the goal.
 3. **More data and steps on the GPU** (`make train`), larger images, and a pretrained vision backbone.
