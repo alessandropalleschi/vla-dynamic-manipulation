@@ -64,3 +64,48 @@ def test_dockerfile_drops_the_expired_yarn_apt_source_before_updating():
     df = "\n".join(line for line in read(".devcontainer/Dockerfile").splitlines() if not line.lstrip().startswith("#"))
     assert "yarn.list" in df
     assert df.index("yarn.list") < df.index("apt-get update") < df.index("apt-get install")
+
+
+# ----------------------------------------------------------------- Claude / Codex in the dev container
+@pytest.mark.parametrize("profile", ["gpu", "cpu"])
+def test_devcontainer_has_claude_codex_extension_features_and_persistent_state(profile):
+    cfg = json.loads(read(f".devcontainer/{profile}/devcontainer.json"))
+    assert "anthropic.claude-code" in cfg["customizations"]["vscode"]["extensions"]
+    assert any(f.startswith("ghcr.io/devcontainers/features/node") for f in cfg["features"])  # npm for the CLIs
+    assert cfg["initializeCommand"] == "bash .devcontainer/init-host.sh"  # runs on the host before the mounts
+    targets = {m.split("target=")[1].split(",")[0]: m for m in cfg["mounts"]}
+    assert set(targets) == {"/home/vscode/.claude", "/home/vscode/.claude.json", "/home/vscode/.codex"}
+    assert all("${localEnv:HOME}" in m and "VLA_DEV_PROFILE" in m and "type=bind" in m for m in targets.values())
+    assert cfg["remoteUser"] == "vscode"  # the mount targets live in this user's home
+
+
+def test_post_create_installs_both_clis_and_vscode_recommends_the_extension():
+    post = read(".devcontainer/post-create.sh")
+    assert "@anthropic-ai/claude-code" in post and "@openai/codex" in post
+    assert "anthropic.claude-code" in json.loads(read(".vscode/extensions.json"))["recommendations"]
+
+
+def test_init_host_script_creates_private_persistent_state_without_clobbering(tmp_path):
+    import os
+    import stat
+    import subprocess
+
+    script = ROOT / ".devcontainer" / "init-host.sh"
+    env = {**os.environ, "HOME": str(tmp_path), "VLA_DEV_PROFILE": "t"}
+
+    def run():
+        return subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+
+    assert run().returncode == 0
+    claude, js, codex = tmp_path / ".claude-t", tmp_path / ".claude-t.json", tmp_path / ".codex-t"
+    assert claude.is_dir() and codex.is_dir() and js.is_file() and js.read_text().strip() == "{}"
+    assert stat.S_IMODE(claude.stat().st_mode) == 0o700 and stat.S_IMODE(js.stat().st_mode) == 0o600
+    js.write_text('{"keep": "me"}')  # a second run must not overwrite an existing login
+    (codex / "auth.json").write_text("secret")
+    assert run().returncode == 0
+    assert js.read_text() == '{"keep": "me"}' and (codex / "auth.json").read_text() == "secret"
+    # a directory where the JSON file should be makes docker mount the wrong thing: fail loudly instead
+    js.unlink()
+    js.mkdir()
+    bad = run()
+    assert bad.returncode == 1 and "is a directory" in bad.stderr

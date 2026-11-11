@@ -3,6 +3,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python -m pip install --upgrade pip
+# Claude Code and Codex CLIs (Node comes from the devcontainer feature). Login state persists via the bind mounts
+# (see init-host.sh); authenticate once inside the container with `claude` and `codex login`.
+if command -v npm >/dev/null 2>&1; then
+  sudo env "PATH=$PATH" npm install -g @anthropic-ai/claude-code @openai/codex \
+    || echo "(installing the claude/codex CLIs failed; retry: sudo npm install -g @anthropic-ai/claude-code @openai/codex)"
+  claude --version 2>/dev/null || true
+  codex --version 2>/dev/null || true
+else
+  echo "(npm not found: the claude/codex CLIs were not installed)"
+fi
+
 git lfs install --local --force && git lfs pull || echo "(git lfs pull failed: meshes may be pointer files; see README)"
 
 # NVIDIA's EGL vendor ICD: the container toolkit normally installs it when the `graphics` capability is
