@@ -12,6 +12,8 @@ the error with the correct one (0 = the text is ignored).
 
 | 3. as 2, plus image-space grounding loss (`--ground-w 1`) | 1500 | 0.052 / 0.049 / 0.054 | +0.0020 / +0.0022 / -0.0002 |
 
+| 4. grounding **pre-training on 30k static scenes**, then (see below) fine-tune on demos | 4000 (pre-train) | n/a (grounding only) | n/a |
+
 Further probes (experiments 1 and 2): the action error on the first 12 steps of an episode (the arm has not moved, only the
 text says which object is meant), and the auxiliary target-localisation error with right vs wrong text over the first
 8 frames. **All gaps are within +-0.006: none of the models used the instruction.**
@@ -28,6 +30,29 @@ instructions, and learning "red", "second from the conveyor", "larger" from 288 
 problem; the number of *frames* is large but they share the same instruction. Grounding needs thousands of distinct pairs,
 and those do not need trajectories.
 
+## Experiment 4: grounding pre-training on static scenes (confirms the data-scale explanation)
+30,000 scenes (`vla_mujoco.data.static_scenes`, ~30 ms each, no rollout), 64 px, 4x4 patch grid, 4000 steps, batch 64.
+Metric: top-1 patch accuracy for the object the instruction names (pick and support), validation scenes only.
+
+| encoder | right text | wrong text | gap | @ step 1000 | pick / support |
+|---|---|---|---|---|---|
+| bow | 0.754 | 0.273 | +0.481 | 0.637 | 0.736 / 0.779 |
+| scratch | 0.754 | 0.261 | +0.493 | 0.629 | 0.736 / 0.779 |
+| pretrained (MiniLM) | 0.761 | 0.259 | +0.502 | 0.709 | 0.738 / 0.793 |
+
+Location-prior baseline 0.154, chance 0.063. With thousands of distinct (scene, instruction) pairs all three encoders learn to
+ground language (gap about +0.5), whereas 288 demo episodes gave no gap. So the earlier failure was data scale, not the encoders
+or the architecture.
+
+* **Encoder comparison:** the final accuracies differ by less than the noise (std. error ~0.008 on this validation set).
+  The pretrained encoder reaches high accuracy faster (0.709 vs ~0.63 at step 1000), which is the only difference we trust.
+  Expect a larger advantage with more diverse phrasing (paraphrases) than the template language used here.
+* **Plateau at ~0.75:** probably the 4x4 patch grid at 64 px (objects share patches, label sits near cell borders); the
+  resolution experiment (finer grid / larger images) is the next test.
+* **Probe caveat:** "wrong text" is another scene's instruction, which often differs in obvious attributes; it shows the
+  text is *used*, not that the finest distinctions (e.g. same-colour objects told apart only by ordinal position) are resolved.
+  Per-attribute breakdowns (colour / category / size / ordinal) would be the stricter test.
+
 ## What this does and does not show
 * All encoders learn the motion structure (phase accuracy ~96 %, vacuum ~95 %) and localise targets far better than the
   mean (aux error 0.50 vs 1.19 on the first frames), so the pipeline trains.
@@ -40,7 +65,7 @@ and those do not need trajectories.
   (the policies were not good enough to be worth rolling out).
 
 ## Hypotheses and next steps (in order of expected payoff)
-1. **Grounding pre-training on static scenes (next).** Generate tens of thousands of scenes + instructions (reset + render only,
+1. **Grounding pre-training on static scenes (done, experiment 4); fine-tuning on demos is running.** Generate tens of thousands of scenes + instructions (reset + render only,
    no expert rollout), train the language-conditioned grounding heads on them, then fine-tune on demonstrations. Success
    criterion: ground accuracy with the right text clearly above wrong-text accuracy. (Direct image-space grounding
    supervision, experiment 3, is already implemented.)
