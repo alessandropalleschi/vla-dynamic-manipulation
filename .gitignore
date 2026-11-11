@@ -39,7 +39,7 @@ __pycache__/
 /simulation/plugins/**/build.*/
 
 # MuJoCo stack outputs
-runs/
+runs*/
 *.gif
 *.egg-info/
 .venv/
