@@ -61,7 +61,9 @@
   "mounts": [
     "source=${localEnv:HOME}/.claude-${localEnv:VLA_DEV_PROFILE:vla_dev},target=/home/vscode/.claude,type=bind",
     "source=${localEnv:HOME}/.claude-${localEnv:VLA_DEV_PROFILE:vla_dev}.json,target=/home/vscode/.claude.json,type=bind",
-    "source=${localEnv:HOME}/.codex-${localEnv:VLA_DEV_PROFILE:vla_dev},target=/home/vscode/.codex,type=bind"
+    "source=${localEnv:HOME}/.codex-${localEnv:VLA_DEV_PROFILE:vla_dev},target=/home/vscode/.codex,type=bind",
+    "source=vla-mujoco-pip-cache,target=/home/vscode/.cache/pip,type=volume",
+    "source=vla-mujoco-precommit-cache,target=/home/vscode/.cache/pre-commit,type=volume"
   ],
   "features": {
     "ghcr.io/devcontainers/features/node:1": {

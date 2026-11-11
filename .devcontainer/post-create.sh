@@ -2,6 +2,10 @@
 # Runs once after the dev container is created. TORCH_VARIANT=cuda|cpu is set by the devcontainer config.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Named volumes (see "mounts" in devcontainer.json) cache downloaded wheels (torch + CUDA libs are several GB) and
+# pre-commit hook environments across container rebuilds. Fresh volumes are root-owned, so hand them to this user.
+mkdir -p "$HOME/.cache"
+sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache" 2>/dev/null || true
 python -m pip install --upgrade pip
 # Claude Code and Codex CLIs (Node comes from the devcontainer feature). Login state persists via the bind mounts
 # (see init-host.sh); authenticate once inside the container with `claude` and `codex login`.
@@ -36,8 +40,6 @@ if [ "${TORCH_VARIANT:-cpu}" = "cuda" ]; then
 else
   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 fi
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[train,dev]"
 PYTHON=python bash .devcontainer/install-hooks.sh   # fails loudly if the commit guard is not active
-python -m pytest
-python -m vla_mujoco.gpu_check || echo "(no usable CUDA device - training will fall back to CPU)"
 echo "Ready. Try:  make demo"
