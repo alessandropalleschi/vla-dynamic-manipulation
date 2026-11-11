@@ -1,7 +1,11 @@
 name: ci
+# DISABLED for now: runs only when started by hand (Actions tab -> ci -> Run workflow), not on push / pull_request.
+# To re-enable: restore the `push:` and `pull_request:` triggers below. For a local runner, also change the job's
+# `runs-on` to `self-hosted` (keep `lfs: true` there, or fetch only the needed meshes to limit LFS bandwidth).
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
+#  push:
+#  pull_request:
 jobs:
   mujoco:
     runs-on: ubuntu-latest

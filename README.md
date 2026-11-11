@@ -98,7 +98,8 @@ make test
 ```
 The **pre-commit hooks** reject files over 1 MB and any checkpoint, dataset, recording or `runs*/` / `data/` output
 (`.pre-commit-config.yaml`; meshes are exempt because they are stored in Git LFS, see `.gitattributes`), so training artifacts cannot be committed by accident.
-CI (`.github/workflows/ci.yml`) runs the same hooks and the tests on every push. VS Code tasks/launch configs for demo, collection,
+CI is currently **disabled**: `.github/workflows/ci.yml` only runs when started by hand (it is meant for a local runner later);
+run `pre-commit run --all-files` and `make test` yourself. VS Code tasks/launch configs for demo, collection,
 training and evaluation are in `.vscode/`.
 
 ## Legacy Gazebo / ROS 2 stack
