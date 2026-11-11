@@ -53,6 +53,31 @@ or the architecture.
   text is *used*, not that the finest distinctions (e.g. same-colour objects told apart only by ordinal position) are resolved.
   Per-attribute breakdowns (colour / category / size / ordinal) would be the stricter test.
 
+## Experiments 5-6: does grounding reach the actions? (fine-tune on demos from the pre-trained grounding model)
+Same 320 demos / hyper-parameters as experiment 3 (1500 steps), initialised from the experiment-4 checkpoints (`--init`).
+`ground_acc` is on demo frames; the "first 12 steps" probe is the action error at the start of each episode (the arm has not
+moved, so only the text says which object is meant); gap = wrong-text error minus right-text error, 32 validation episodes.
+
+| model | demo ground_acc (right / wrong) | val action gap | first-12-steps action gap |
+|---|---|---|---|
+| no pre-training (exp. 3), pretrained text | 0.687 / 0.684 | -0.0002 | -0.0006 |
+| grounding pre-trained, **no slots**, pretrained text | 0.750 / 0.591 | +0.0010 | +0.0017 |
+| grounding pre-trained, **slots**, pretrained text | 0.749 / 0.612 | +0.0011 (+0.0042 @1000) | **+0.0197** |
+| no pre-training (exp. 3), bow | 0.693 / 0.678 | +0.0020 | -0.0019 |
+| grounding pre-trained, no slots, bow | 0.781 / 0.666 | +0.0017 | -0.0052 |
+| grounding pre-trained, slots, bow | 0.741 / 0.639 | +0.0039 (+0.0057 @1000) | -0.0013 |
+
+* **Grounding transfers:** after pre-training, grounding on demo frames depends on the text (gap +0.12 to +0.16 vs ~0 without it).
+* **But the actions barely use it.** Without slots the action gap is zero even at the decision frames: the grounding head was a side
+  branch the belief did not read. With grounded object slots (pick/support patch distributions pool patch features and expected
+  coordinates into the belief) the gaps grow (validation +0.004-0.006 at step 1000, first-12-steps +0.020 for the pretrained
+  text encoder), so the pathway helps, **but the effect is small** (the error is ~0.30) and appeared for only one of two encoders.
+  With 32 validation episodes and no per-episode confidence intervals this should be read as "promising, not established".
+* **Action quality got worse at the decision frames after pre-training** (0.30-0.36 vs 0.21): the pre-trained models had
+  no action/proprioception training before fine-tuning, so equal fine-tuning steps are not an equal footing.
+* The teacher-forced action loss is dominated by frames where the arm's own motion already implies the goal, so it gives
+  language little gradient.
+
 ## What this does and does not show
 * All encoders learn the motion structure (phase accuracy ~96 %, vacuum ~95 %) and localise targets far better than the
   mean (aux error 0.50 vs 1.19 on the first frames), so the pipeline trains.
@@ -69,7 +94,7 @@ or the architecture.
    no expert rollout), train the language-conditioned grounding heads on them, then fine-tune on demonstrations. Success
    criterion: ground accuracy with the right text clearly above wrong-text accuracy. (Direct image-space grounding
    supervision, experiment 3, is already implemented.)
-2. **Weight the loss on decision frames** (start of approach / transfer, where the goal is not yet implied by the arm's own
+2. **Weight the loss on decision frames (next; the experiments above point here)** (start of approach / transfer, where the goal is not yet implied by the arm's own
    motion). Teacher-forced action loss is dominated by frames where the proprioceptive velocity already reveals the goal.
 3. **More data and steps on the GPU** (`make train`), larger images, and a pretrained vision backbone.
 4. Re-run the probes above (`lang_gap` is logged during training) and only then compare encoders and heads.
