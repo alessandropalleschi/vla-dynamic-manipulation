@@ -24,7 +24,8 @@ language-specified targets, distractors, speed changes and visual occlusion.
 | `vla-mujoco (GPU, NVIDIA)` | the host has an NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) | CUDA torch for training, MuJoCo cameras rendered by the GPU through EGL |
 | `vla-mujoco (CPU only)` | no GPU / CI-like setups | CPU torch, software rendering |
 
-Both install Python 3.12, all dependencies and the recommended extensions, then run the tests and `make gpu-check`.
+Both install Python 3.12, all dependencies and the recommended extensions, **activate the git hooks** (large-file / artifact
+guard, ruff, Git LFS; the setup fails loudly if they are not active), then run the tests and `make gpu-check`.
 Without VS Code: `docker compose -f compose.mujoco.yaml run --rm mujoco` gives a GPU shell.
 
 **Local:**

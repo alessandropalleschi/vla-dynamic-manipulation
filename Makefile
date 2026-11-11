@@ -4,14 +4,13 @@ export MUJOCO_GL ?= egl
 
 install:            ## editable install with training + dev extras, plus git hooks
 	$(PY) -m pip install -e ".[train,dev]"
-	$(PY) -m pre_commit install
+	PYTHON=$(PY) bash .devcontainer/install-hooks.sh
 
 gpu-check:          ## CUDA + GPU (EGL) rendering sanity check
 	$(PY) -m vla_mujoco.gpu_check
 
 hooks:              ## git pre-commit hooks (large-file / artifact guard, ruff) + Git LFS for meshes
-	git lfs install
-	$(PY) -m pre_commit install
+	PYTHON=$(PY) bash .devcontainer/install-hooks.sh
 
 test:               ## fast simulator tests (no GPU, no rendering)
 	$(PY) -m pytest

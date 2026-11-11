@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python -m pip install --upgrade pip
-git lfs install && git lfs pull || echo "(git lfs pull failed: meshes may be pointer files; see README)"
+git lfs install --local && git lfs pull || echo "(git lfs pull failed: meshes may be pointer files; see README)"
 
 # NVIDIA's EGL vendor ICD: the container toolkit normally installs it when the `graphics` capability is
 # requested; create it if the driver library is present but the ICD file is not.
@@ -20,7 +20,7 @@ else
   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 fi
 python -m pip install -e ".[dev]"
-python -m pre_commit install   # large-file / artifact guard + ruff on every commit
+PYTHON=python bash .devcontainer/install-hooks.sh   # fails loudly if the commit guard is not active
 python -m pytest
 python -m vla_mujoco.gpu_check || echo "(no usable CUDA device - training will fall back to CPU)"
 echo "Ready. Try:  make demo"
