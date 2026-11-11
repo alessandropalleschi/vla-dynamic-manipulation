@@ -61,8 +61,13 @@ def load_data(path, cameras, max_eps=None, decision_window=10):
 class Batcher:
     """Samples fixed-length windows; text is looked up from pre-encoded unique instructions."""
 
-    def __init__(self, eps, text, chunk, seq, dev):
+    def __init__(self, eps, text, chunk, seq, dev, start_pad=0, start_p=0.0):
         self.eps, self.text, self.chunk, self.seq, self.dev = eps, text, chunk, seq, dev
+        # The loss skips the first `burn_in` positions of every window, so with windows starting at s >= 0 the first
+        # `burn_in` frames of an episode (where the policy first picks a direction) would NEVER be trained on. With
+        # probability `start_p` a window therefore starts `start_pad` frames *before* the episode: those positions
+        # repeat frame 0 and fall in the burn-in region, and the real frame 0 is the first one the loss sees.
+        self.start_pad, self.start_p = int(start_pad), float(start_p)
         self.uid = {s: i for i, s in enumerate(text["strings"])}
 
     def make(self, B, rng):
@@ -72,8 +77,11 @@ class Batcher:
         tgt, tid = [], []
         for _ in range(B):
             e = self.eps[rng.integers(len(self.eps))]
-            s = int(rng.integers(0, max(1, e["T"] - self.seq + 1)))
-            idx = np.arange(s, s + self.seq).clip(max=e["T"] - 1)
+            if self.start_pad > 0 and rng.random() < self.start_p:
+                s = -self.start_pad
+            else:
+                s = int(rng.integers(0, max(1, e["T"] - self.seq + 1)))
+            idx = np.arange(s, s + self.seq).clip(0, e["T"] - 1)
             for i, im in enumerate(e["img"]):
                 imgs[i].append(im[idx])
             for k in keys:
@@ -228,6 +236,12 @@ def main():
     ap.add_argument("--seq", type=int, default=24)
     ap.add_argument("--burn-in", type=int, default=6, help="leading steps of each window excluded from the loss")
     ap.add_argument("--chunk", type=int, default=8)
+    ap.add_argument(
+        "--start-window-p",
+        type=float,
+        default=0.25,
+        help="share of windows anchored before the episode start so frames 0..burn_in-1 get a loss (0 = old)",
+    )
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--ema", type=float, default=0.999)
@@ -313,8 +327,8 @@ def main():
         start = ck["step"]
         print(f"resumed from step {start}")
 
-    tb = Batcher(train_eps, text, a.chunk, a.seq, dev)
-    vb = Batcher(val_eps, text, a.chunk, a.seq, dev)
+    tb = Batcher(train_eps, text, a.chunk, a.seq, dev, a.burn_in, a.start_window_p)
+    vb = Batcher(val_eps, text, a.chunk, a.seq, dev, a.burn_in, a.start_window_p)
     pre = Prefetcher(lambda: tb.make(a.batch, rng))
     vrng = np.random.default_rng(999)
     log_f = open(out / "log.csv", "a", newline="")
